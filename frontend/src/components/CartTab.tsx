@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { Order, OrderItem, placeOrder } from '../api';
+import { Order, OrderItem, placeOrder, User } from '../api';
 import { S, mutedText, sectionTitle } from '../theme';
 
 export type CartItem = OrderItem & {
@@ -9,10 +9,12 @@ export type CartItem = OrderItem & {
 };
 
 type Props = {
+  user: User | null;
   cartItems: CartItem[];
   onUpdateQty: (itemId: string, nextQty: number) => void;
   onRemoveItem: (itemId: string) => void;
   onOrderPlaced: (order: Order) => void;
+  onLoginRequest: () => void;
 };
 
 function formatPickupValue(date: string, time: string) {
@@ -40,7 +42,7 @@ function buildPickupSlots(dateValue: string) {
   return slots;
 }
 
-export default function CartTab({ cartItems, onUpdateQty, onRemoveItem, onOrderPlaced }: Props) {
+export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, onOrderPlaced, onLoginRequest }: Props) {
   const [customerName, setCustomerName] = useState('');
   const [phone, setPhone] = useState('');
   const [pickupDate, setPickupDate] = useState('');
@@ -48,6 +50,14 @@ export default function CartTab({ cartItems, onUpdateQty, onRemoveItem, onOrderP
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // Pre-fill from logged-in user
+  useEffect(() => {
+    if (user) {
+      setCustomerName(user.name);
+      setPhone(user.phone);
+    }
+  }, [user]);
 
   const subtotal = useMemo(
     () => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0),
@@ -145,40 +155,51 @@ export default function CartTab({ cartItems, onUpdateQty, onRemoveItem, onOrderP
         <h2 style={sectionTitle}>Place Order</h2>
         <p style={{ ...mutedText, marginBottom: '1rem' }}>Open daily for pickup: 10 AM – 8 PM (Mon–Sat), 10 AM – 6 PM (Sun).</p>
 
-        {error ? <div style={{ ...S.errorBox, marginBottom: '0.9rem' }}>{error}</div> : null}
-        {success ? <div style={{ ...S.successBox, marginBottom: '0.9rem' }}>{success}</div> : null}
-
-        <form onSubmit={submitOrder} style={{ display: 'grid', gap: '0.9rem' }}>
-          <div>
-            <label htmlFor="customerName" style={S.label}>Customer Name</label>
-            <input id="customerName" value={customerName} onChange={(event) => setCustomerName(event.target.value)} style={S.inp} placeholder="Your full name" />
+        {!user ? (
+          <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+            <p style={{ ...mutedText, marginBottom: '1rem' }}>Sign in to place an order and receive pickup notifications.</p>
+            <button type="button" onClick={onLoginRequest} style={S.primaryBtn}>
+              🔑 Sign In to Order
+            </button>
           </div>
+        ) : (
+          <>
+            {error ? <div style={{ ...S.errorBox, marginBottom: '0.9rem' }}>{error}</div> : null}
+            {success ? <div style={{ ...S.successBox, marginBottom: '0.9rem' }}>{success}</div> : null}
 
-          <div>
-            <label htmlFor="phone" style={S.label}>Phone</label>
-            <input id="phone" value={phone} onChange={(event) => setPhone(event.target.value)} style={S.inp} placeholder="(609) 555-1234" />
-          </div>
+            <form onSubmit={submitOrder} style={{ display: 'grid', gap: '0.9rem' }}>
+              <div>
+                <label htmlFor="customerName" style={S.label}>Customer Name</label>
+                <input id="customerName" value={customerName} onChange={(event) => setCustomerName(event.target.value)} style={S.inp} placeholder="Your full name" />
+              </div>
 
-          <div style={{ display: 'grid', gap: '0.9rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-            <div>
-              <label htmlFor="pickupDate" style={S.label}>Pickup Date</label>
-              <input id="pickupDate" type="date" value={pickupDate} min={new Date().toISOString().split('T')[0]} onChange={(event) => setPickupDate(event.target.value)} style={S.inp} />
-            </div>
-            <div>
-              <label htmlFor="pickupTime" style={S.label}>Pickup Time</label>
-              <select id="pickupTime" value={pickupTime} onChange={(event) => setPickupTime(event.target.value)} style={S.inp}>
-                <option value="">Select a pickup time</option>
-                {pickupSlots.map((slot) => (
-                  <option key={slot} value={slot}>{slot}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+              <div>
+                <label htmlFor="phone" style={S.label}>Phone</label>
+                <input id="phone" value={phone} onChange={(event) => setPhone(event.target.value)} style={{ ...S.inp, background: '#f9fafb' }} readOnly placeholder="(609) 555-1234" />
+              </div>
 
-          <button type="submit" disabled={submitting} style={{ ...S.primaryBtn, opacity: submitting ? 0.7 : 1 }}>
-            {submitting ? 'Placing Order...' : 'Place Order'}
-          </button>
-        </form>
+              <div style={{ display: 'grid', gap: '0.9rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                <div>
+                  <label htmlFor="pickupDate" style={S.label}>Pickup Date</label>
+                  <input id="pickupDate" type="date" value={pickupDate} min={new Date().toISOString().split('T')[0]} onChange={(event) => setPickupDate(event.target.value)} style={S.inp} />
+                </div>
+                <div>
+                  <label htmlFor="pickupTime" style={S.label}>Pickup Time</label>
+                  <select id="pickupTime" value={pickupTime} onChange={(event) => setPickupTime(event.target.value)} style={S.inp}>
+                    <option value="">Select a pickup time</option>
+                    {pickupSlots.map((slot) => (
+                      <option key={slot} value={slot}>{slot}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <button type="submit" disabled={submitting} style={{ ...S.primaryBtn, opacity: submitting ? 0.7 : 1 }}>
+                {submitting ? 'Placing Order...' : 'Place Order'}
+              </button>
+            </form>
+          </>
+        )}
       </section>
     </div>
   );

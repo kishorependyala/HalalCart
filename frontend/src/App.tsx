@@ -1,18 +1,31 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getOrders, MenuItem, Order } from './api';
+import { getOrders, MenuItem, Order, User } from './api';
+import AdminTab from './components/AdminTab';
 import CartTab, { CartItem } from './components/CartTab';
+import LoginModal from './components/LoginModal';
 import MenuTab from './components/MenuTab';
 import OrdersTab from './components/OrdersTab';
 import { S } from './theme';
 
-type TabId = 'menu' | 'cart' | 'orders';
+type TabId = 'menu' | 'cart' | 'orders' | 'admin';
 
-const tabs: Array<{ id: TabId; label: string; emoji: string }> = [
+const customerTabs: Array<{ id: TabId; label: string; emoji: string }> = [
   { id: 'menu', label: 'Menu', emoji: '🍖' },
   { id: 'cart', label: 'Cart', emoji: '🛒' },
-  { id: 'orders', label: 'Orders', emoji: '📋' },
+  { id: 'orders', label: 'My Orders', emoji: '📋' },
 ];
+
+const STORAGE_KEY = 'halalcart_user';
+
+function loadStoredUser(): User | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as User) : null;
+  } catch {
+    return null;
+  }
+}
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('menu');
@@ -20,8 +33,30 @@ function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
+  const [user, setUser] = useState<User | null>(loadStoredUser);
+  const [showLogin, setShowLogin] = useState(false);
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.qty, 0), [cartItems]);
+
+  const tabs = useMemo(() => {
+    const base = [...customerTabs];
+    if (user?.isAdmin) base.push({ id: 'admin' as TabId, label: 'Admin', emoji: '🛡️' });
+    return base;
+  }, [user]);
+
+  const handleLogin = (u: User) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+    setUser(u);
+    setShowLogin(false);
+    if (u.isAdmin) setActiveTab('admin');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setUser(null);
+    setOrders([]);
+    setActiveTab('menu');
+  };
 
   const addToCart = (item: MenuItem, qty: number) => {
     setCartItems((current) => {
@@ -46,21 +81,27 @@ function App() {
   };
 
   const refreshOrders = useCallback(async () => {
+    if (!user) return;
     setOrdersLoading(true);
     setOrdersError('');
     try {
-      const nextOrders = await getOrders();
+      const nextOrders = await getOrders(user.phone);
       setOrders(nextOrders);
     } catch (err) {
       setOrdersError(err instanceof Error ? err.message : 'Unable to load orders.');
     } finally {
       setOrdersLoading(false);
     }
-  }, []);
+  }, [user]);
+
+  useEffect(() => {
+    if (user && !user.isAdmin) refreshOrders();
+  }, [user, refreshOrders]);
 
   const handleOrderPlaced = (order: Order) => {
     setCartItems([]);
     setOrders((current) => [order, ...current.filter((existing) => existing.id !== order.id)]);
+    setActiveTab('orders');
   };
 
   return (
@@ -71,8 +112,24 @@ function App() {
             <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#78350f' }}>🥩 Halal Meat Market</div>
             <div style={{ color: '#92400e', fontSize: '0.88rem' }}>Pickup only · 355 Applegarth Rd, Monroe Township, NJ</div>
           </div>
-          <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 999, padding: '0.35rem 0.75rem', color: '#92400e', fontWeight: 800 }}>
-            Cart {cartCount}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 999, padding: '0.35rem 0.75rem', color: '#92400e', fontWeight: 800 }}>
+              Cart {cartCount}
+            </div>
+            {user ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ color: '#78350f', fontWeight: 700, fontSize: '0.88rem' }}>
+                  {user.isAdmin ? '🛡️' : '👤'} {user.name}
+                </span>
+                <button type="button" onClick={handleLogout} style={{ ...S.outlineBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setShowLogin(true)} style={{ ...S.primaryBtn, fontSize: '0.85rem', padding: '0.4rem 0.9rem' }}>
+                Sign In
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -119,12 +176,31 @@ function App() {
 
         {activeTab === 'menu' ? <MenuTab onAddToCart={addToCart} /> : null}
         {activeTab === 'cart' ? (
-          <CartTab cartItems={cartItems} onUpdateQty={updateQty} onRemoveItem={removeItem} onOrderPlaced={handleOrderPlaced} />
+          <CartTab
+            user={user}
+            cartItems={cartItems}
+            onUpdateQty={updateQty}
+            onRemoveItem={removeItem}
+            onOrderPlaced={handleOrderPlaced}
+            onLoginRequest={() => setShowLogin(true)}
+          />
         ) : null}
         {activeTab === 'orders' ? (
-          <OrdersTab orders={orders} loading={ordersLoading} error={ordersError} onRefresh={refreshOrders} />
+          <OrdersTab
+            user={user}
+            orders={orders}
+            loading={ordersLoading}
+            error={ordersError}
+            onRefresh={refreshOrders}
+            onOrdersUpdate={setOrders}
+          />
+        ) : null}
+        {activeTab === 'admin' && user?.isAdmin ? (
+          <AdminTab adminPhone={user.phone} />
         ) : null}
       </main>
+
+      {showLogin ? <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} /> : null}
     </div>
   );
 }

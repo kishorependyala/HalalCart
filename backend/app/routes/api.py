@@ -3,7 +3,14 @@ from uuid import uuid4
 
 from flask import Blueprint, jsonify, request
 
-from ..data import list_orders, save_order
+from ..data import (
+    ADMIN_PHONE,
+    get_order,
+    list_orders,
+    save_order,
+    suggested_prep_minutes,
+    update_order,
+)
 
 bp = Blueprint('api', __name__)
 
@@ -25,6 +32,30 @@ MENU = [
     {'id': 's4', 'category': 'Snacks', 'name': 'Seekh Kebab (4 pc)', 'price': 8.00, 'unit': 'per pack', 'description': 'Grilled minced meat kebabs on skewers'},
 ]
 
+VALID_STATUSES = {'Pending', 'Accepted', 'Ready', 'Completed'}
+
+
+@bp.get('/health')
+def health():
+    import os
+    data_dir = os.getenv('DATA_DIR', 'data')
+    return jsonify({'status': 'ok', 'dataDir': data_dir})
+
+
+def _is_admin() -> bool:
+    phone = (request.headers.get('X-Admin-Phone') or '').replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+    return phone == ADMIN_PHONE
+
+
+@bp.post('/login')
+def login():
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name', '')).strip()
+    phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
+    if not name or not phone:
+        return jsonify({'error': 'Name and phone are required.'}), 400
+    return jsonify({'name': name, 'phone': phone, 'isAdmin': phone == ADMIN_PHONE})
+
 
 @bp.get('/menu')
 def get_menu():
@@ -33,14 +64,26 @@ def get_menu():
 
 @bp.get('/orders')
 def get_orders():
-    return jsonify(list_orders())
+    phone_filter = request.args.get('phone', '').strip()
+    orders = list_orders()
+    if phone_filter and not _is_admin():
+        orders = [o for o in orders if o.get('phone') == phone_filter]
+    return jsonify(orders)
+
+
+@bp.get('/orders/<order_id>')
+def get_single_order(order_id: str):
+    order = get_order(order_id)
+    if order is None:
+        return jsonify({'error': 'Order not found.'}), 404
+    return jsonify(order)
 
 
 @bp.post('/orders')
 def create_order():
     payload = request.get_json(silent=True) or {}
     customer_name = str(payload.get('customerName', '')).strip()
-    phone = str(payload.get('phone', '')).strip()
+    phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
     pickup_time = str(payload.get('pickupTime', '')).strip()
     items = payload.get('items') or []
 
@@ -82,7 +125,46 @@ def create_order():
         'items': normalized_items,
         'total': round(total, 2),
         'status': 'Pending',
+        'prepMinutes': suggested_prep_minutes(normalized_items),
         'createdAt': datetime.now(timezone.utc).isoformat(),
+        'acceptedAt': None,
+        'readyAt': None,
     }
     save_order(order)
     return jsonify(order), 201
+
+
+@bp.patch('/orders/<order_id>')
+def patch_order(order_id: str):
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+
+    order = get_order(order_id)
+    if order is None:
+        return jsonify({'error': 'Order not found.'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    updates: dict = {}
+
+    if 'status' in payload:
+        new_status = str(payload['status']).strip()
+        if new_status not in VALID_STATUSES:
+            return jsonify({'error': f'Invalid status. Must be one of: {", ".join(VALID_STATUSES)}'}), 400
+        updates['status'] = new_status
+        now = datetime.now(timezone.utc).isoformat()
+        if new_status == 'Accepted' and not order.get('acceptedAt'):
+            updates['acceptedAt'] = now
+        if new_status == 'Ready' and not order.get('readyAt'):
+            updates['readyAt'] = now
+
+    if 'prepMinutes' in payload:
+        try:
+            prep = int(payload['prepMinutes'])
+            if prep < 1:
+                raise ValueError
+            updates['prepMinutes'] = prep
+        except (TypeError, ValueError):
+            return jsonify({'error': 'prepMinutes must be a positive integer.'}), 400
+
+    updated = update_order(order_id, updates)
+    return jsonify(updated)
