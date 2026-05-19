@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { getOrders, Order, updateOrder } from '../api';
+import { getOrders, Order, updateOrder, User } from '../api';
 import { S, mutedText, sectionTitle } from '../theme';
 
 type Props = {
-  adminPhone: string;
+  adminUser: User;
 };
 
 function statusBadge(status: Order['status']) {
@@ -26,7 +26,7 @@ function statusBadge(status: Order['status']) {
   };
 }
 
-export default function AdminTab({ adminPhone }: Props) {
+export default function AdminTab({ adminUser }: Props) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -55,7 +55,7 @@ export default function AdminTab({ adminPhone }: Props) {
   const patchOrder = async (id: string, updates: { status?: Order['status']; prepMinutes?: number }) => {
     setBusy((b) => ({ ...b, [id]: true }));
     try {
-      const updated = await updateOrder(id, updates, adminPhone);
+      const updated = await updateOrder(id, updates, adminUser);
       setOrders((current) => current.map((o) => (o.id === id ? updated : o)));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Update failed.');

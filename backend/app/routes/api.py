@@ -4,6 +4,7 @@ from uuid import uuid4
 from flask import Blueprint, jsonify, request
 
 from ..data import (
+    ADMIN_EMAIL,
     ADMIN_PHONE,
     get_order,
     list_orders,
@@ -44,7 +45,12 @@ def health():
 
 def _is_admin() -> bool:
     phone = (request.headers.get('X-Admin-Phone') or '').replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-    return phone == ADMIN_PHONE
+    if phone == ADMIN_PHONE:
+        return True
+    if ADMIN_EMAIL:
+        email = (request.headers.get('X-Admin-Email') or '').strip().lower()
+        return email == ADMIN_EMAIL
+    return False
 
 
 @bp.post('/login')
@@ -52,9 +58,14 @@ def login():
     payload = request.get_json(silent=True) or {}
     name = str(payload.get('name', '')).strip()
     phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
+    email = str(payload.get('email', '')).strip().lower()
     if not name or not phone:
         return jsonify({'error': 'Name and phone are required.'}), 400
-    return jsonify({'name': name, 'phone': phone, 'isAdmin': phone == ADMIN_PHONE})
+    is_admin = (phone == ADMIN_PHONE) or (bool(ADMIN_EMAIL) and email == ADMIN_EMAIL)
+    resp: dict = {'name': name, 'phone': phone, 'isAdmin': is_admin}
+    if email:
+        resp['email'] = email
+    return jsonify(resp)
 
 
 @bp.get('/menu')

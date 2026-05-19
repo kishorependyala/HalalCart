@@ -1,3 +1,4 @@
+import { useAuth0 } from '@auth0/auth0-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { getOrders, MenuItem, Order, User } from './api';
@@ -27,7 +28,10 @@ function loadStoredUser(): User | null {
   }
 }
 
+const ADMIN_EMAIL = process.env.REACT_APP_ADMIN_EMAIL || '';
+
 function App() {
+  const { user: auth0User, isAuthenticated, logout: auth0Logout } = useAuth0();
   const [activeTab, setActiveTab] = useState<TabId>('menu');
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -51,11 +55,38 @@ function App() {
     if (u.isAdmin) setActiveTab('admin');
   };
 
+  // Sync Auth0 social login → our User state
+  useEffect(() => {
+    if (isAuthenticated && auth0User) {
+      const email = auth0User.email || '';
+      const name = auth0User.name || auth0User.nickname || email.split('@')[0] || 'User';
+      const isAdmin = !!ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+      const socialUser: User = {
+        name,
+        phone: email,   // use email as the order identifier for social users
+        email,
+        picture: auth0User.picture,
+        isAdmin,
+        authMethod: 'social',
+      };
+      // Only update if this social user isn't already stored
+      const stored = localStorage.getItem(STORAGE_KEY);
+      const current = stored ? JSON.parse(stored) as User : null;
+      if (!current || current.authMethod === 'social' || current.phone !== socialUser.phone) {
+        handleLogin(socialUser);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, auth0User]);
+
   const handleLogout = () => {
     localStorage.removeItem(STORAGE_KEY);
     setUser(null);
     setOrders([]);
     setActiveTab('menu');
+    if (isAuthenticated) {
+      auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+    }
   };
 
   const addToCart = (item: MenuItem, qty: number) => {
@@ -118,8 +149,13 @@ function App() {
             </div>
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {user.picture ? (
+                  <img src={user.picture} alt={user.name} style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '2px solid #fcd34d' }} />
+                ) : (
+                  <span style={{ color: '#78350f', fontSize: '1rem' }}>{user.isAdmin ? '🛡️' : '👤'}</span>
+                )}
                 <span style={{ color: '#78350f', fontWeight: 700, fontSize: '0.88rem' }}>
-                  {user.isAdmin ? '🛡️' : '👤'} {user.name}
+                  {user.name}
                 </span>
                 <button type="button" onClick={handleLogout} style={{ ...S.outlineBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>
                   Sign Out
@@ -196,7 +232,7 @@ function App() {
           />
         ) : null}
         {activeTab === 'admin' && user?.isAdmin ? (
-          <AdminTab adminPhone={user.phone} />
+          <AdminTab adminUser={user} />
         ) : null}
       </main>
 

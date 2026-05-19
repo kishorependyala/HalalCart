@@ -7,6 +7,7 @@ from typing import Any, Optional
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
 
 ADMIN_PHONE = '7327184414'
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', '').strip().lower()
 CHICKEN_PREP_MINUTES = 20
 DEFAULT_GOAT_PREP_MINUTES = 45
 

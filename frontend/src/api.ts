@@ -2,8 +2,11 @@ const BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 
 export type User = {
   name: string;
-  phone: string;
+  phone: string;        // phone number OR email (used as order identifier)
+  email?: string;       // set for social-login users
+  picture?: string;     // avatar URL from social provider
   isAdmin: boolean;
+  authMethod?: 'phone' | 'social';
 };
 
 export type MenuItem = {
@@ -49,8 +52,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return data as T;
 }
 
-function adminHeaders(adminPhone: string): Record<string, string> {
-  return { 'Content-Type': 'application/json', 'X-Admin-Phone': adminPhone };
+function adminHeaders(user: { phone: string; email?: string; authMethod?: string }): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (user.authMethod === 'social' && user.email) {
+    headers['X-Admin-Email'] = user.email;
+  } else {
+    headers['X-Admin-Phone'] = user.phone;
+  }
+  return headers;
 }
 
 export const loginUser = (name: string, phone: string) =>
@@ -85,10 +94,10 @@ export const placeOrder = (order: {
 export const updateOrder = (
   id: string,
   updates: { status?: Order['status']; prepMinutes?: number },
-  adminPhone: string
+  adminUser: { phone: string; email?: string; authMethod?: string }
 ) =>
   fetch(`${BASE}/api/orders/${id}`, {
     method: 'PATCH',
-    headers: adminHeaders(adminPhone),
+    headers: adminHeaders(adminUser),
     body: JSON.stringify(updates),
   }).then((r) => parseResponse<Order>(r));
