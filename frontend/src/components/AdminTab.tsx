@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { getOrders, Order, updateOrder, User } from '../api';
+import {
+  AdminsData,
+  DataFileEntry,
+  addAdmin,
+  getAdmins,
+  getOrders,
+  listDataFiles,
+  Order,
+  readDataFile,
+  removeAdmin,
+  updateOrder,
+  User,
+} from '../api';
 import { S, mutedText, sectionTitle } from '../theme';
+
+type AdminSubTab = 'orders' | 'data' | 'admins';
 
 type Props = {
   adminUser: User;
@@ -27,6 +41,53 @@ function statusBadge(status: Order['status']) {
 }
 
 export default function AdminTab({ adminUser }: Props) {
+  const [subTab, setSubTab] = useState<AdminSubTab>('orders');
+
+  const subTabs: Array<{ id: AdminSubTab; label: string; emoji: string }> = [
+    { id: 'orders', label: 'Orders', emoji: '📋' },
+    { id: 'data',   label: 'Data',   emoji: '📁' },
+    { id: 'admins', label: 'Admins', emoji: '🛡️' },
+  ];
+
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      <section style={S.card}>
+        <h2 style={sectionTitle}>🛡️ Admin Panel</h2>
+        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.75rem', borderBottom: '2px solid #fed7aa', paddingBottom: '0' }}>
+          {subTabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setSubTab(t.id)}
+              style={{
+                background: 'none',
+                border: 'none',
+                borderBottom: subTab === t.id ? '3px solid #f59e0b' : '3px solid transparent',
+                color: subTab === t.id ? '#92400e' : '#6b7280',
+                fontWeight: subTab === t.id ? 800 : 600,
+                cursor: 'pointer',
+                padding: '0.55rem 0.85rem',
+                marginBottom: '-2px',
+                fontSize: '0.9rem',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {t.emoji} {t.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {subTab === 'orders' && <OrdersPanel adminUser={adminUser} />}
+      {subTab === 'data'   && <DataPanel   adminUser={adminUser} />}
+      {subTab === 'admins' && <AdminsPanel adminUser={adminUser} />}
+    </div>
+  );
+}
+
+// ── Orders Panel ─────────────────────────────────────────────────────────────
+
+function OrdersPanel({ adminUser }: { adminUser: User }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -77,15 +138,10 @@ export default function AdminTab({ adminUser }: Props) {
 
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
-      <section style={S.card}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
-          <div>
-            <h2 style={sectionTitle}>🛡️ Admin — All Orders</h2>
-            <p style={mutedText}>Accept orders, set prep time, and mark ready for pickup.</p>
-          </div>
-          <button type="button" onClick={loadOrders} style={S.outlineBtn}>Refresh</button>
-        </div>
-      </section>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <p style={mutedText}>Accept orders, set prep time, and mark ready for pickup.</p>
+        <button type="button" onClick={loadOrders} style={S.outlineBtn}>Refresh</button>
+      </div>
 
       {loading && !orders.length ? <div style={S.card}>Loading orders…</div> : null}
       {error ? <div style={{ ...S.card, ...S.errorBox }}>{error}</div> : null}
@@ -205,3 +261,198 @@ function OrderCard({ order, isBusy, prepEdit, onPrepEditChange, onSavePrepTime, 
     </div>
   );
 }
+
+// ── Data Browser Panel ────────────────────────────────────────────────────────
+
+function DataPanel({ adminUser }: { adminUser: User }) {
+  const [files, setFiles] = useState<DataFileEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    listDataFiles(adminUser)
+      .then(setFiles)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load files.'))
+      .finally(() => setLoading(false));
+  }, [adminUser]);
+
+  const openFile = async (path: string) => {
+    if (selected === path) { setSelected(null); setFileContent(null); return; }
+    setSelected(path);
+    setFileLoading(true);
+    setFileContent(null);
+    try {
+      const res = await readDataFile(path, adminUser);
+      setFileContent(res.content);
+    } catch (err) {
+      setFileContent('Error reading file.');
+    } finally {
+      setFileLoading(false);
+    }
+  };
+
+  const fmt = (bytes: number) =>
+    bytes < 1024 ? `${bytes} B` : bytes < 1_048_576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`;
+
+  return (
+    <div style={{ display: 'grid', gap: '0.75rem' }}>
+      <p style={mutedText}>Browse files in the data directory.</p>
+      {loading && <div style={S.card}>Loading files…</div>}
+      {error  && <div style={{ ...S.card, ...S.errorBox }}>{error}</div>}
+      {!loading && !error && !files.length && <div style={{ ...S.card, background: '#fffaf0' }}>No files found.</div>}
+      {files.map((f) => (
+        <div key={f.path} style={{ border: '1px solid #fed7aa', borderRadius: '0.8rem', background: '#fffbeb', overflow: 'hidden' }}>
+          <button
+            type="button"
+            onClick={() => openFile(f.path)}
+            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', textAlign: 'left' }}
+          >
+            <span style={{ fontWeight: 600, color: '#78350f', fontFamily: 'monospace', fontSize: '0.88rem' }}>
+              {selected === f.path ? '▼' : '▶'} {f.path}
+            </span>
+            <span style={{ color: '#9ca3af', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{fmt(f.size)}</span>
+          </button>
+          {selected === f.path && (
+            <div style={{ borderTop: '1px solid #fed7aa', padding: '0.75rem 1rem' }}>
+              {fileLoading
+                ? <span style={mutedText}>Loading…</span>
+                : <pre style={{ margin: 0, fontSize: '0.78rem', color: '#374151', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 400, overflowY: 'auto' }}>{fileContent}</pre>
+              }
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Admins Manager Panel ──────────────────────────────────────────────────────
+
+function AdminsPanel({ adminUser }: { adminUser: User }) {
+  const [data, setData] = useState<AdminsData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  const loadAdmins = useCallback(async () => {
+    setLoading(true); setError('');
+    try { setData(await getAdmins(adminUser)); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Failed to load admins.'); }
+    finally { setLoading(false); }
+  }, [adminUser]);
+
+  useEffect(() => { loadAdmins(); }, [loadAdmins]);
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPhone.trim() && !newEmail.trim()) return;
+    setBusy(true); setMsg('');
+    try {
+      const entry: { phone?: string; email?: string } = {};
+      if (newPhone.trim()) entry.phone = newPhone.trim();
+      if (newEmail.trim()) entry.email = newEmail.trim();
+      const res = await addAdmin(entry, adminUser);
+      setData((d) => d ? { ...d, phones: res.phones, emails: res.emails } : d);
+      setNewPhone(''); setNewEmail('');
+      setMsg('Admin added.');
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Failed to add admin.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRemove = async (type: 'phone' | 'email', value: string) => {
+    if (!window.confirm(`Remove ${type} "${value}" from admins?`)) return;
+    setBusy(true); setMsg('');
+    try {
+      const res = await removeAdmin(type === 'phone' ? { phone: value } : { email: value }, adminUser);
+      setData((d) => d ? { ...d, phones: res.phones, emails: res.emails } : d);
+      setMsg('Admin removed.');
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Failed to remove admin.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) return <div style={S.card}>Loading admins…</div>;
+  if (error)   return <div style={{ ...S.card, ...S.errorBox }}>{error}</div>;
+  if (!data)   return null;
+
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      {msg && <div style={{ ...S.card, ...(msg.includes('ailed') ? S.errorBox : S.successBox) }}>{msg}</div>}
+
+      {/* Built-in phones */}
+      <div style={S.card}>
+        <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>🔒 Built-in Admin Phones</h3>
+        <p style={{ ...mutedText, marginBottom: '0.65rem' }}>These cannot be removed.</p>
+        {data.builtinPhones.map((ph) => (
+          <div key={ph} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0', borderBottom: '1px solid #fde68a' }}>
+            <span style={{ flex: 1, fontFamily: 'monospace', color: '#78350f' }}>📱 {ph}</span>
+            <span style={{ fontSize: '0.75rem', color: '#9ca3af', background: '#f3f4f6', borderRadius: 999, padding: '0.15rem 0.5rem' }}>built-in</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Dynamic phones */}
+      <div style={S.card}>
+        <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>📱 Admin Phones</h3>
+        {data.phones.length === 0
+          ? <p style={mutedText}>No additional admin phones.</p>
+          : data.phones.map((ph) => (
+            <div key={ph} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0', borderBottom: '1px solid #fde68a' }}>
+              <span style={{ flex: 1, fontFamily: 'monospace', color: '#78350f' }}>{ph}</span>
+              <button type="button" disabled={busy} onClick={() => handleRemove('phone', ph)} style={{ ...S.dangerBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>
+                Remove
+              </button>
+            </div>
+          ))
+        }
+      </div>
+
+      {/* Dynamic emails */}
+      <div style={S.card}>
+        <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>✉️ Admin Emails</h3>
+        {data.emails.length === 0
+          ? <p style={mutedText}>No admin emails configured.</p>
+          : data.emails.map((em) => (
+            <div key={em} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.45rem 0', borderBottom: '1px solid #fde68a' }}>
+              <span style={{ flex: 1, color: '#78350f' }}>{em}</span>
+              <button type="button" disabled={busy} onClick={() => handleRemove('email', em)} style={{ ...S.dangerBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>
+                Remove
+              </button>
+            </div>
+          ))
+        }
+      </div>
+
+      {/* Add form */}
+      <div style={S.card}>
+        <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>➕ Add Admin</h3>
+        <form onSubmit={handleAdd} style={{ display: 'grid', gap: '0.75rem' }}>
+          <div>
+            <label style={S.label}>Phone Number</label>
+            <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} style={S.inp} placeholder="e.g. 9179419406" type="tel" />
+          </div>
+          <div>
+            <label style={S.label}>— or — Email</label>
+            <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} style={S.inp} placeholder="admin@example.com" type="email" />
+          </div>
+          <button type="submit" disabled={busy || (!newPhone.trim() && !newEmail.trim())} style={{ ...S.primaryBtn, opacity: busy || (!newPhone.trim() && !newEmail.trim()) ? 0.6 : 1 }}>
+            {busy ? 'Saving…' : 'Add Admin'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+

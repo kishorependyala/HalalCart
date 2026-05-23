@@ -5,9 +5,15 @@ from flask import Blueprint, jsonify, request
 
 from ..data import (
     ADMIN_EMAIL,
-    ADMIN_PHONE,
+    BUILTIN_ADMIN_PHONES,
     get_order,
+    is_admin_email,
+    is_admin_phone,
+    list_data_files,
     list_orders,
+    load_admins,
+    read_data_file,
+    save_admins,
     save_order,
     suggested_prep_minutes,
     update_order,
@@ -16,8 +22,6 @@ from ..data import (
 bp = Blueprint('api', __name__)
 
 MENU = [
-    {'id': 'g1', 'category': 'Goat', 'name': 'Whole Goat', 'price': 180.00, 'unit': 'per animal', 'description': 'Fresh whole goat, cleaned and cut to order'},
-    {'id': 'g2', 'category': 'Goat', 'name': 'Half Goat', 'price': 95.00, 'unit': 'per half', 'description': 'Half goat, mixed cuts'},
     {'id': 'g3', 'category': 'Goat', 'name': 'Goat Leg', 'price': 35.00, 'unit': 'per leg', 'description': 'Bone-in goat leg, great for biryani'},
     {'id': 'g4', 'category': 'Goat', 'name': 'Goat Shoulder', 'price': 28.00, 'unit': 'per lb', 'description': 'Tender goat shoulder, perfect for curry'},
     {'id': 'g5', 'category': 'Goat', 'name': 'Goat Chops', 'price': 22.00, 'unit': 'per lb', 'description': 'Goat rib chops, halal certified'},
@@ -27,10 +31,6 @@ MENU = [
     {'id': 'c3', 'category': 'Chicken', 'name': 'Boneless Breast', 'price': 5.99, 'unit': 'per lb', 'description': 'Skinless boneless chicken breast'},
     {'id': 'c4', 'category': 'Chicken', 'name': 'Chicken Wings', 'price': 4.50, 'unit': 'per lb', 'description': 'Fresh chicken wings'},
     {'id': 'c5', 'category': 'Chicken', 'name': 'Chicken Keema', 'price': 4.99, 'unit': 'per lb', 'description': 'Ground chicken, great for kebabs'},
-    {'id': 's1', 'category': 'Snacks', 'name': 'Samosa (4 pc)', 'price': 4.00, 'unit': 'per pack', 'description': 'Crispy fried pastry with spiced potato filling'},
-    {'id': 's2', 'category': 'Snacks', 'name': 'Chicken Samosa (4 pc)', 'price': 5.00, 'unit': 'per pack', 'description': 'Samosa filled with spiced chicken'},
-    {'id': 's3', 'category': 'Snacks', 'name': 'Pakora (8 pc)', 'price': 5.00, 'unit': 'per pack', 'description': 'Crispy fried vegetable fritters'},
-    {'id': 's4', 'category': 'Snacks', 'name': 'Seekh Kebab (4 pc)', 'price': 8.00, 'unit': 'per pack', 'description': 'Grilled minced meat kebabs on skewers'},
 ]
 
 VALID_STATUSES = {'Pending', 'Accepted', 'Ready', 'Completed'}
@@ -45,11 +45,11 @@ def health():
 
 def _is_admin() -> bool:
     phone = (request.headers.get('X-Admin-Phone') or '').replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
-    if phone == ADMIN_PHONE:
+    if phone and is_admin_phone(phone):
         return True
-    if ADMIN_EMAIL:
-        email = (request.headers.get('X-Admin-Email') or '').strip().lower()
-        return email == ADMIN_EMAIL
+    email = (request.headers.get('X-Admin-Email') or '').strip().lower()
+    if email and is_admin_email(email):
+        return True
     return False
 
 
@@ -61,7 +61,7 @@ def login():
     email = str(payload.get('email', '')).strip().lower()
     if not name or not phone:
         return jsonify({'error': 'Name and phone are required.'}), 400
-    is_admin = (phone == ADMIN_PHONE) or (bool(ADMIN_EMAIL) and email == ADMIN_EMAIL)
+    is_admin = is_admin_phone(phone) or (bool(email) and is_admin_email(email))
     resp: dict = {'name': name, 'phone': phone, 'isAdmin': is_admin}
     if email:
         resp['email'] = email
@@ -179,3 +179,79 @@ def patch_order(order_id: str):
 
     updated = update_order(order_id, updates)
     return jsonify(updated)
+
+
+# ── Admin management routes ──────────────────────────────────────────────────
+
+@bp.get('/admin/admins')
+def get_admins():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    stored = load_admins()
+    return jsonify({
+        'builtinPhones': sorted(BUILTIN_ADMIN_PHONES),
+        'phones': stored.get('phones', []),
+        'emails': stored.get('emails', []),
+    })
+
+
+@bp.post('/admin/admins')
+def add_admin():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
+    email = str(payload.get('email', '')).strip().lower()
+    if not phone and not email:
+        return jsonify({'error': 'phone or email is required.'}), 400
+    stored = load_admins()
+    if phone:
+        if phone not in stored['phones'] and phone not in BUILTIN_ADMIN_PHONES:
+            stored.setdefault('phones', []).append(phone)
+    if email:
+        if email not in stored.get('emails', []) and email != ADMIN_EMAIL:
+            stored.setdefault('emails', []).append(email)
+    save_admins(stored)
+    return jsonify({'ok': True, 'phones': stored.get('phones', []), 'emails': stored.get('emails', [])})
+
+
+@bp.delete('/admin/admins')
+def remove_admin():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
+    email = str(payload.get('email', '')).strip().lower()
+    if not phone and not email:
+        return jsonify({'error': 'phone or email is required.'}), 400
+    if phone and phone in BUILTIN_ADMIN_PHONES:
+        return jsonify({'error': 'Cannot remove a built-in admin phone.'}), 400
+    stored = load_admins()
+    if phone and phone in stored.get('phones', []):
+        stored['phones'].remove(phone)
+    if email and email in stored.get('emails', []):
+        stored['emails'].remove(email)
+    save_admins(stored)
+    return jsonify({'ok': True, 'phones': stored.get('phones', []), 'emails': stored.get('emails', [])})
+
+
+# ── Data folder browser routes ───────────────────────────────────────────────
+
+@bp.get('/admin/data')
+def browse_data():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    return jsonify(list_data_files())
+
+
+@bp.get('/admin/data/file')
+def read_data():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    rel_path = request.args.get('path', '').strip()
+    if not rel_path:
+        return jsonify({'error': 'path is required.'}), 400
+    content = read_data_file(rel_path)
+    if content is None:
+        return jsonify({'error': 'File not found or not readable.'}), 404
+    return jsonify({'path': rel_path, 'content': content})

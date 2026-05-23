@@ -6,6 +6,9 @@ from typing import Any, Optional
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
 
+# Built-in admin phones — always valid regardless of admins.json
+BUILTIN_ADMIN_PHONES: set[str] = {'7327184414', '9179419406'}
+# Legacy alias kept for backward compatibility
 ADMIN_PHONE = '7327184414'
 ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', '').strip().lower()
 CHICKEN_PREP_MINUTES = 20
@@ -71,6 +74,75 @@ def avg_goat_prep_minutes() -> int:
                 except (ValueError, TypeError):
                     pass
     return round(sum(diffs) / len(diffs)) if diffs else DEFAULT_GOAT_PREP_MINUTES
+
+
+# ── Admin management ────────────────────────────────────────────────────────
+
+def get_admins_path() -> Path:
+    return get_data_dir() / 'admins.json'
+
+
+def load_admins() -> dict[str, Any]:
+    """Return stored admin data (phones/emails lists, excluding builtins)."""
+    path = get_admins_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {'phones': [], 'emails': []}
+
+
+def save_admins(data: dict[str, Any]) -> None:
+    path = get_admins_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+
+
+def is_admin_phone(phone: str) -> bool:
+    if phone in BUILTIN_ADMIN_PHONES:
+        return True
+    return phone in load_admins().get('phones', [])
+
+
+def is_admin_email(email: str) -> bool:
+    if ADMIN_EMAIL and email == ADMIN_EMAIL:
+        return True
+    return email in load_admins().get('emails', [])
+
+
+# ── Data folder browser ──────────────────────────────────────────────────────
+
+def list_data_files() -> list[dict[str, Any]]:
+    """List all files under the data directory (relative paths)."""
+    data_dir = get_data_dir()
+    result: list[dict[str, Any]] = []
+    if not data_dir.exists():
+        return result
+    for p in sorted(data_dir.rglob('*')):
+        if p.is_file():
+            stat = p.stat()
+            result.append({
+                'path': str(p.relative_to(data_dir)),
+                'size': stat.st_size,
+            })
+    return result
+
+
+def read_data_file(rel_path: str) -> Optional[str]:
+    """Read a file within the data directory. Returns None if unsafe/missing."""
+    data_dir = get_data_dir().resolve()
+    try:
+        target = (data_dir / rel_path).resolve()
+        target.relative_to(data_dir)  # raises ValueError if outside data_dir
+    except (ValueError, Exception):
+        return None
+    if not target.is_file():
+        return None
+    try:
+        return target.read_text(encoding='utf-8')
+    except Exception:
+        return None
 
 
 def suggested_prep_minutes(items: list[dict[str, Any]]) -> int:

@@ -7,6 +7,7 @@ import CartTab, { CartItem } from './components/CartTab';
 import LoginModal from './components/LoginModal';
 import MenuTab from './components/MenuTab';
 import OrdersTab from './components/OrdersTab';
+import ProfileModal from './components/ProfileModal';
 import { S } from './theme';
 
 type TabId = 'menu' | 'cart' | 'orders' | 'admin';
@@ -39,6 +40,7 @@ function App() {
   const [ordersError, setOrdersError] = useState('');
   const [user, setUser] = useState<User | null>(loadStoredUser);
   const [showLogin, setShowLogin] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.qty, 0), [cartItems]);
 
@@ -53,6 +55,12 @@ function App() {
     setUser(u);
     setShowLogin(false);
     if (u.isAdmin) setActiveTab('admin');
+  };
+
+  const handleProfileUpdate = (updated: User) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    setUser(updated);
+    setShowProfile(false);
   };
 
   // Sync Auth0 social login → our User state
@@ -149,14 +157,21 @@ function App() {
             </div>
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                {user.picture ? (
-                  <img src={user.picture} alt={user.name} style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '2px solid #fcd34d' }} />
-                ) : (
-                  <span style={{ color: '#78350f', fontSize: '1rem' }}>{user.isAdmin ? '🛡️' : '👤'}</span>
-                )}
-                <span style={{ color: '#78350f', fontWeight: 700, fontSize: '0.88rem' }}>
-                  {user.name}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowProfile(true)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.2rem 0.4rem', borderRadius: '0.5rem' }}
+                  title="View / edit profile"
+                >
+                  {user.picture ? (
+                    <img src={user.picture} alt={user.name} style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', border: '2px solid #fcd34d' }} />
+                  ) : (
+                    <span style={{ color: '#78350f', fontSize: '1rem' }}>{user.isAdmin ? '🛡️' : '👤'}</span>
+                  )}
+                  <span style={{ color: '#78350f', fontWeight: 700, fontSize: '0.88rem' }}>
+                    {user.name}
+                  </span>
+                </button>
                 <button type="button" onClick={handleLogout} style={{ ...S.outlineBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>
                   Sign Out
                 </button>
@@ -237,6 +252,7 @@ function App() {
       </main>
 
       {showLogin ? <LoginModal onLogin={handleLogin} onClose={() => setShowLogin(false)} /> : null}
+      {showProfile && user ? <ProfileModal user={user} onUpdate={handleProfileUpdate} onClose={() => setShowProfile(false)} /> : null}
     </div>
   );
 }

@@ -101,3 +101,49 @@ export const updateOrder = (
     headers: adminHeaders(adminUser),
     body: JSON.stringify(updates),
   }).then((r) => parseResponse<Order>(r));
+
+// ── Admin management ─────────────────────────────────────────────────────────
+
+export type AdminsData = {
+  builtinPhones: string[];
+  phones: string[];
+  emails: string[];
+};
+
+export const getAdmins = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
+  fetch(`${BASE}/api/admin/admins`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<AdminsData>(r));
+
+export const addAdmin = (
+  entry: { phone?: string; email?: string },
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/admins`, {
+    method: 'POST',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(entry),
+  }).then((r) => parseResponse<{ ok: boolean; phones: string[]; emails: string[] }>(r));
+
+export const removeAdmin = (
+  entry: { phone?: string; email?: string },
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/admins`, {
+    method: 'DELETE',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(entry),
+  }).then((r) => parseResponse<{ ok: boolean; phones: string[]; emails: string[] }>(r));
+
+// ── Data browser ─────────────────────────────────────────────────────────────
+
+export type DataFileEntry = { path: string; size: number };
+
+export const listDataFiles = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
+  fetch(`${BASE}/api/admin/data`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<DataFileEntry[]>(r));
+
+export const readDataFile = (
+  path: string,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/data/file?path=${encodeURIComponent(path)}`, { headers: adminHeaders(adminUser) }).then(
+    (r) => parseResponse<{ path: string; content: string }>(r)
+  );
