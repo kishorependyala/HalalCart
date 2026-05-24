@@ -6,7 +6,9 @@ import {
   DataFileEntry,
   MenuItem,
   addAdmin,
+  addMenuItem,
   adminGetMenu,
+  deleteMenuItem,
   getAdmins,
   getOrders,
   getSettings,
@@ -272,21 +274,39 @@ function OrderCard({ order, isBusy, prepEdit, onPrepEditChange, onSavePrepTime, 
 
 // ── Menu Management Panel ─────────────────────────────────────────────────────
 
+const CATEGORIES: MenuItem['category'][] = ['Goat', 'Chicken', 'Snacks'];
+const DELETE_PIN = '1234567';
+
+type NewItemDraft = { name: string; category: MenuItem['category']; price: string; unit: string; description: string };
+const emptyDraft = (): NewItemDraft => ({ name: '', category: 'Chicken', price: '', unit: 'per lb', description: '' });
+
 function MenuPanel({ adminUser }: { adminUser: User }) {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<MenuItem>>({});
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState('');
+
+  const [priceEdits, setPriceEdits] = useState<Record<string, string>>({});
+  const [priceBusy, setPriceBusy] = useState<Record<string, boolean>>({});
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletePin, setDeletePin] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [newDraft, setNewDraft] = useState<NewItemDraft>(emptyDraft());
+  const [addBusy, setAddBusy] = useState(false);
+
   const [settingsDraft, setSettingsDraft] = useState<Partial<AppSettings>>({});
   const [settingsBusy, setSettingsBusy] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     Promise.all([adminGetMenu(adminUser), getSettings(adminUser)])
       .then(([menuData, settingsData]) => {
         setMenu(menuData);
@@ -298,41 +318,76 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
   }, [adminUser]);
 
   const startEdit = (item: MenuItem) => {
-    setEditingId(item.id);
-    setDraft({ name: item.name, price: item.price, unit: item.unit, description: item.description });
+    setEditingId(item.id); setDeletingId(null);
+    setDraft({ name: item.name, price: item.price, unit: item.unit, description: item.description, category: item.category });
     setMsg('');
   };
-
   const cancelEdit = () => { setEditingId(null); setDraft({}); };
-
   const saveItem = async (itemId: string) => {
     setBusy(true); setMsg('');
     try {
       const updated = await updateMenuItem(itemId, draft, adminUser);
       setMenu((m) => m.map((i) => (i.id === itemId ? updated : i)));
-      setEditingId(null);
-      setDraft({});
+      setEditingId(null); setDraft({});
       setMsg('Item saved.');
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Save failed.');
-    } finally {
-      setBusy(false);
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Save failed.'); }
+    finally { setBusy(false); }
+  };
+
+  const savePrice = async (item: MenuItem) => {
+    const raw = priceEdits[item.id];
+    const val = parseFloat(raw ?? '');
+    if (raw === undefined || isNaN(val) || val < 0) return;
+    setPriceBusy((b) => ({ ...b, [item.id]: true }));
+    try {
+      const updated = await updateMenuItem(item.id, { price: val }, adminUser);
+      setMenu((m) => m.map((i) => (i.id === item.id ? updated : i)));
+      setPriceEdits((e) => { const n = { ...e }; delete n[item.id]; return n; });
+      setMsg('Price updated.');
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Price update failed.'); }
+    finally { setPriceBusy((b) => ({ ...b, [item.id]: false })); }
+  };
+
+  const startDelete = (item: MenuItem) => {
+    setDeletingId(item.id); setDeletePin(''); setEditingId(null); setMsg('');
+  };
+  const confirmDelete = async (itemId: string) => {
+    if (deletePin !== DELETE_PIN) { setMsg('Incorrect PIN.'); return; }
+    setDeleteBusy(true); setMsg('');
+    try {
+      await deleteMenuItem(itemId, adminUser);
+      setMenu((m) => m.filter((i) => i.id !== itemId));
+      setDeletingId(null); setDeletePin('');
+      setMsg('Item deleted.');
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Delete failed.'); }
+    finally { setDeleteBusy(false); }
+  };
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const price = parseFloat(newDraft.price);
+    if (!newDraft.name.trim() || isNaN(price) || price < 0) {
+      setMsg('Name and a valid price are required.'); return;
     }
+    setAddBusy(true); setMsg('');
+    try {
+      const created = await addMenuItem({ ...newDraft, price }, adminUser);
+      setMenu((m) => [...m, created]);
+      setNewDraft(emptyDraft()); setShowAdd(false);
+      setMsg('Item added.');
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Add failed.'); }
+    finally { setAddBusy(false); }
   };
 
   const saveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSettingsBusy(true); setMsg('');
+    e.preventDefault(); setSettingsBusy(true); setMsg('');
     try {
       const updated = await updateSettings(settingsDraft, adminUser);
       setSettings(updated);
       setSettingsDraft({ chickenPrepMinutes: updated.chickenPrepMinutes, goatPrepMinutes: updated.goatPrepMinutes });
       setMsg('Settings saved.');
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : 'Failed to save settings.');
-    } finally {
-      setSettingsBusy(false);
-    }
+    } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed to save settings.'); }
+    finally { setSettingsBusy(false); }
   };
 
   if (loading) return <div style={S.card}>Loading menu…</div>;
@@ -343,69 +398,161 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
       {msg && (
-        <div style={{ ...S.card, ...(msg.toLowerCase().includes('fail') || msg.toLowerCase().includes('error') ? S.errorBox : S.successBox) }}>
+        <div style={{ ...S.card, ...(msg.toLowerCase().includes('fail') || msg.toLowerCase().includes('incorrect') || msg.toLowerCase().includes('error') ? S.errorBox : S.successBox) }}>
           {msg}
         </div>
       )}
 
-      {/* Menu items by category */}
       {categories.map((cat) => (
         <div key={cat} style={S.card}>
           <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>
             {cat === 'Goat' ? '🐐' : cat === 'Chicken' ? '🍗' : '🍟'} {cat}
           </h3>
           <div style={{ display: 'grid', gap: '0.75rem' }}>
-            {menu.filter((i) => i.category === cat).map((item) => (
-              <div key={item.id} style={{ border: '1px solid #fde68a', borderRadius: '0.7rem', padding: '0.75rem', background: '#fffbeb' }}>
-                {editingId === item.id ? (
-                  <div style={{ display: 'grid', gap: '0.55rem' }}>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <div style={{ flex: '2 1 160px' }}>
-                        <label style={S.label}>Name</label>
-                        <input style={S.inp} value={draft.name ?? ''} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+            {menu.filter((i) => i.category === cat).map((item) => {
+              const priceVal = priceEdits[item.id] !== undefined ? priceEdits[item.id] : item.price.toFixed(2);
+              const isPriceDirty = priceEdits[item.id] !== undefined && priceEdits[item.id] !== item.price.toFixed(2);
+              return (
+                <div key={item.id} style={{ border: '1px solid #fde68a', borderRadius: '0.7rem', padding: '0.75rem', background: '#fffbeb' }}>
+
+                  {editingId === item.id ? (
+                    <div style={{ display: 'grid', gap: '0.55rem' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <div style={{ flex: '2 1 160px' }}>
+                          <label style={S.label}>Name</label>
+                          <input style={S.inp} value={draft.name ?? ''} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+                        </div>
+                        <div style={{ flex: '1 1 100px' }}>
+                          <label style={S.label}>Unit</label>
+                          <input style={S.inp} value={draft.unit ?? ''} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} />
+                        </div>
+                        <div style={{ flex: '1 1 110px' }}>
+                          <label style={S.label}>Category</label>
+                          <select style={S.inp} value={draft.category ?? item.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value as MenuItem['category'] }))}>
+                            {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                          </select>
+                        </div>
                       </div>
-                      <div style={{ flex: '1 1 90px' }}>
-                        <label style={S.label}>Price ($)</label>
-                        <input style={S.inp} type="number" min={0} step={0.01} value={draft.price ?? ''} onChange={(e) => setDraft((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))} />
+                      <div>
+                        <label style={S.label}>Description</label>
+                        <input style={S.inp} value={draft.description ?? ''} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
                       </div>
-                      <div style={{ flex: '1 1 100px' }}>
-                        <label style={S.label}>Unit</label>
-                        <input style={S.inp} value={draft.unit ?? ''} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} />
-                      </div>
-                    </div>
-                    <div>
-                      <label style={S.label}>Description</label>
-                      <input style={S.inp} value={draft.description ?? ''} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
-                    </div>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      <button type="button" onClick={() => saveItem(item.id)} disabled={busy} style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }}>
-                        {busy ? 'Saving…' : '💾 Save'}
-                      </button>
-                      <button type="button" onClick={cancelEdit} disabled={busy} style={S.outlineBtn}>Cancel</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#78350f' }}>{item.name}</div>
-                      <div style={{ ...mutedText, marginTop: '0.15rem' }}>{item.description}</div>
-                      <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.75rem', fontSize: '0.88rem', flexWrap: 'wrap' }}>
-                        <span style={{ color: '#16a34a', fontWeight: 700 }}>${item.price.toFixed(2)}</span>
-                        <span style={{ color: '#6b7280' }}>{item.unit}</span>
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button type="button" onClick={() => saveItem(item.id)} disabled={busy} style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }}>
+                          {busy ? 'Saving…' : '💾 Save'}
+                        </button>
+                        <button type="button" onClick={cancelEdit} disabled={busy} style={S.outlineBtn}>Cancel</button>
                       </div>
                     </div>
-                    <button type="button" onClick={() => startEdit(item)} style={{ ...S.outlineBtn, fontSize: '0.82rem', padding: '0.3rem 0.75rem', whiteSpace: 'nowrap' }}>
-                      ✏️ Edit
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+
+                  ) : deletingId === item.id ? (
+                    <div style={{ display: 'grid', gap: '0.5rem' }}>
+                      <div style={{ fontWeight: 700, color: '#b91c1c' }}>🗑️ Delete "{item.name}"?</div>
+                      <p style={{ ...mutedText, margin: 0 }}>Enter PIN to confirm deletion.</p>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input
+                          type="password" placeholder="PIN" maxLength={10}
+                          value={deletePin}
+                          onChange={(e) => setDeletePin(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && confirmDelete(item.id)}
+                          style={{ ...S.inp, width: 110 }}
+                          autoFocus
+                        />
+                        <button type="button" onClick={() => confirmDelete(item.id)} disabled={deleteBusy}
+                          style={{ ...S.dangerBtn, opacity: deleteBusy ? 0.6 : 1 }}>
+                          {deleteBusy ? 'Deleting…' : 'Confirm Delete'}
+                        </button>
+                        <button type="button" onClick={() => setDeletingId(null)} disabled={deleteBusy} style={S.outlineBtn}>Cancel</button>
+                      </div>
+                    </div>
+
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.45rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <div>
+                          <span style={{ fontWeight: 700, color: '#78350f' }}>{item.name}</span>
+                          <span style={{ ...mutedText, marginLeft: '0.5rem', fontSize: '0.8rem' }}>{item.unit}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                          <button type="button" onClick={() => startEdit(item)} style={{ ...S.outlineBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>✏️ Edit</button>
+                          <button type="button" onClick={() => startDelete(item)} style={{ ...S.dangerBtn, fontSize: '0.78rem', padding: '0.25rem 0.6rem' }}>🗑️</button>
+                        </div>
+                      </div>
+                      {item.description && <div style={{ ...mutedText, fontSize: '0.82rem' }}>{item.description}</div>}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.1rem' }}>
+                        <span style={{ fontSize: '0.82rem', color: '#6b7280', whiteSpace: 'nowrap' }}>Price $</span>
+                        <input
+                          type="number" min={0} step={0.01}
+                          value={priceVal}
+                          onChange={(e) => setPriceEdits((p) => ({ ...p, [item.id]: e.target.value }))}
+                          onBlur={() => savePrice(item)}
+                          onKeyDown={(e) => e.key === 'Enter' && savePrice(item)}
+                          style={{ ...S.inp, width: 80, padding: '0.3rem 0.45rem', fontWeight: 700, color: '#16a34a' }}
+                        />
+                        {isPriceDirty && (
+                          <button type="button" onClick={() => savePrice(item)} disabled={!!priceBusy[item.id]}
+                            style={{ ...S.primaryBtn, fontSize: '0.78rem', padding: '0.28rem 0.65rem', opacity: priceBusy[item.id] ? 0.6 : 1 }}>
+                            {priceBusy[item.id] ? '…' : '💾'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       ))}
 
-      {/* Default prep times */}
+      <div style={S.card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showAdd ? '0.75rem' : 0 }}>
+          <h3 style={{ margin: 0, color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>➕ Add New Item</h3>
+          <button type="button" onClick={() => { setShowAdd((v) => !v); setNewDraft(emptyDraft()); }}
+            style={{ ...S.outlineBtn, fontSize: '0.82rem', padding: '0.3rem 0.75rem' }}>
+            {showAdd ? 'Cancel' : '+ Add'}
+          </button>
+        </div>
+        {showAdd && (
+          <form onSubmit={handleAdd} style={{ display: 'grid', gap: '0.65rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div style={{ flex: '2 1 160px' }}>
+                <label style={S.label}>Name *</label>
+                <input required style={S.inp} value={newDraft.name}
+                  onChange={(e) => setNewDraft((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Goat Ribs" />
+              </div>
+              <div style={{ flex: '1 1 110px' }}>
+                <label style={S.label}>Category *</label>
+                <select required style={S.inp} value={newDraft.category}
+                  onChange={(e) => setNewDraft((d) => ({ ...d, category: e.target.value as MenuItem['category'] }))}>
+                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 90px' }}>
+                <label style={S.label}>Price ($) *</label>
+                <input required type="number" min={0} step={0.01} style={S.inp} value={newDraft.price}
+                  onChange={(e) => setNewDraft((d) => ({ ...d, price: e.target.value }))} placeholder="0.00" />
+              </div>
+              <div style={{ flex: '1 1 110px' }}>
+                <label style={S.label}>Unit</label>
+                <input style={S.inp} value={newDraft.unit}
+                  onChange={(e) => setNewDraft((d) => ({ ...d, unit: e.target.value }))} placeholder="per lb" />
+              </div>
+            </div>
+            <div>
+              <label style={S.label}>Description</label>
+              <input style={S.inp} value={newDraft.description}
+                onChange={(e) => setNewDraft((d) => ({ ...d, description: e.target.value }))} placeholder="Short description…" />
+            </div>
+            <button type="submit" disabled={addBusy} style={{ ...S.primaryBtn, opacity: addBusy ? 0.6 : 1, justifySelf: 'start' }}>
+              {addBusy ? 'Adding…' : '➕ Add Item'}
+            </button>
+          </form>
+        )}
+      </div>
+
       <div style={S.card}>
         <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>⏱️ Default Prep Times</h3>
         <p style={{ ...mutedText, marginBottom: '0.75rem' }}>Used when estimating prep time for new orders.</p>
@@ -413,19 +560,13 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 140px' }}>
               <label style={S.label}>🍗 Chicken (minutes)</label>
-              <input
-                type="number" min={1} style={S.inp}
-                value={settingsDraft.chickenPrepMinutes ?? ''}
-                onChange={(e) => setSettingsDraft((s) => ({ ...s, chickenPrepMinutes: parseInt(e.target.value, 10) || 0 }))}
-              />
+              <input type="number" min={1} style={S.inp} value={settingsDraft.chickenPrepMinutes ?? ''}
+                onChange={(e) => setSettingsDraft((s) => ({ ...s, chickenPrepMinutes: parseInt(e.target.value, 10) || 0 }))} />
             </div>
             <div style={{ flex: '1 1 140px' }}>
               <label style={S.label}>🐐 Goat (minutes)</label>
-              <input
-                type="number" min={1} style={S.inp}
-                value={settingsDraft.goatPrepMinutes ?? ''}
-                onChange={(e) => setSettingsDraft((s) => ({ ...s, goatPrepMinutes: parseInt(e.target.value, 10) || 0 }))}
-              />
+              <input type="number" min={1} style={S.inp} value={settingsDraft.goatPrepMinutes ?? ''}
+                onChange={(e) => setSettingsDraft((s) => ({ ...s, goatPrepMinutes: parseInt(e.target.value, 10) || 0 }))} />
             </div>
           </div>
           <button type="submit" disabled={settingsBusy} style={{ ...S.primaryBtn, opacity: settingsBusy ? 0.6 : 1, justifySelf: 'start' }}>
@@ -438,6 +579,23 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
 }
 
 // ── Data Browser Panel ────────────────────────────────────────────────────────
+
+function FileBreadcrumb({ path }: { path: string }) {
+  const parts = path.replace(/\\/g, '/').split('/');
+  const allParts = ['data', ...parts];
+  return (
+    <span style={{ fontFamily: 'monospace', fontSize: '0.88rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.1rem' }}>
+      {allParts.map((part, i) => (
+        <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
+          {i > 0 && <span style={{ color: '#d1d5db', margin: '0 0.2rem' }}>›</span>}
+          <span style={{ color: i === allParts.length - 1 ? '#78350f' : '#9ca3af', fontWeight: i === allParts.length - 1 ? 700 : 400 }}>
+            {i === 0 ? '📁 ' : ''}{part}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
 
 function DataPanel({ adminUser }: { adminUser: User }) {
   const [files, setFiles] = useState<DataFileEntry[]>([]);
@@ -457,17 +615,12 @@ function DataPanel({ adminUser }: { adminUser: User }) {
 
   const openFile = async (path: string) => {
     if (selected === path) { setSelected(null); setFileContent(null); return; }
-    setSelected(path);
-    setFileLoading(true);
-    setFileContent(null);
+    setSelected(path); setFileLoading(true); setFileContent(null);
     try {
       const res = await readDataFile(path, adminUser);
       setFileContent(res.content);
-    } catch (err) {
-      setFileContent('Error reading file.');
-    } finally {
-      setFileLoading(false);
-    }
+    } catch { setFileContent('Error reading file.'); }
+    finally { setFileLoading(false); }
   };
 
   const fmt = (bytes: number) =>
@@ -477,7 +630,7 @@ function DataPanel({ adminUser }: { adminUser: User }) {
     <div style={{ display: 'grid', gap: '0.75rem' }}>
       <p style={mutedText}>Browse files in the data directory.</p>
       {loading && <div style={S.card}>Loading files…</div>}
-      {error  && <div style={{ ...S.card, ...S.errorBox }}>{error}</div>}
+      {error   && <div style={{ ...S.card, ...S.errorBox }}>{error}</div>}
       {!loading && !error && !files.length && <div style={{ ...S.card, background: '#fffaf0' }}>No files found.</div>}
       {files.map((f) => (
         <div key={f.path} style={{ border: '1px solid #fed7aa', borderRadius: '0.8rem', background: '#fffbeb', overflow: 'hidden' }}>
@@ -486,10 +639,11 @@ function DataPanel({ adminUser }: { adminUser: User }) {
             onClick={() => openFile(f.path)}
             style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', textAlign: 'left' }}
           >
-            <span style={{ fontWeight: 600, color: '#78350f', fontFamily: 'monospace', fontSize: '0.88rem' }}>
-              {selected === f.path ? '▼' : '▶'} {f.path}
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>{selected === f.path ? '▼' : '▶'}</span>
+              <FileBreadcrumb path={f.path} />
             </span>
-            <span style={{ color: '#9ca3af', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>{fmt(f.size)}</span>
+            <span style={{ color: '#9ca3af', fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(f.size)}</span>
           </button>
           {selected === f.path && (
             <div style={{ borderTop: '1px solid #fed7aa', padding: '0.75rem 1rem' }}>
@@ -504,6 +658,7 @@ function DataPanel({ adminUser }: { adminUser: User }) {
     </div>
   );
 }
+
 
 // ── Admins Manager Panel ──────────────────────────────────────────────────────
 

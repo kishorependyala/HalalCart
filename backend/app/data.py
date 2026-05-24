@@ -207,6 +207,33 @@ def update_menu_item(item_id: str, updates: dict[str, Any]) -> Optional[dict[str
     return None
 
 
+def delete_menu_item(item_id: str) -> bool:
+    """Delete a menu item by id. Returns True if deleted, False if not found."""
+    menu = load_menu()
+    new_menu = [item for item in menu if item['id'] != item_id]
+    if len(new_menu) == len(menu):
+        return False
+    save_menu(new_menu)
+    return True
+
+
+def add_menu_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Append a new menu item, generating a unique id."""
+    from uuid import uuid4
+    menu = load_menu()
+    new_item: dict[str, Any] = {
+        'id': str(uuid4())[:8],
+        'category': item['category'],
+        'name': item['name'],
+        'price': round(float(item['price']), 2),
+        'unit': item.get('unit', ''),
+        'description': item.get('description', ''),
+    }
+    menu.append(new_item)
+    save_menu(menu)
+    return new_item
+
+
 # ── Settings management ───────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS: dict[str, Any] = {

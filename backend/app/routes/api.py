@@ -6,6 +6,8 @@ from flask import Blueprint, jsonify, request
 from ..data import (
     ADMIN_EMAIL,
     BUILTIN_ADMIN_PHONES,
+    add_menu_item,
+    delete_menu_item,
     get_order,
     is_admin_email,
     is_admin_phone,
@@ -258,6 +260,31 @@ def admin_get_menu():
     return jsonify(load_menu())
 
 
+@bp.post('/admin/menu')
+def admin_add_menu_item():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name', '')).strip()
+    category = str(payload.get('category', '')).strip()
+    if not name or not category:
+        return jsonify({'error': 'name and category are required.'}), 400
+    try:
+        price = float(payload.get('price', 0))
+        if price < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({'error': 'price must be a non-negative number.'}), 400
+    item = add_menu_item({
+        'name': name,
+        'category': category,
+        'price': price,
+        'unit': str(payload.get('unit', '')).strip(),
+        'description': str(payload.get('description', '')).strip(),
+    })
+    return jsonify(item), 201
+
+
 @bp.patch('/admin/menu/<item_id>')
 def admin_patch_menu_item(item_id: str):
     if not _is_admin():
@@ -289,6 +316,16 @@ def admin_patch_menu_item(item_id: str):
     if item is None:
         return jsonify({'error': 'Menu item not found.'}), 404
     return jsonify(item)
+
+
+@bp.delete('/admin/menu/<item_id>')
+def admin_delete_menu_item(item_id: str):
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    deleted = delete_menu_item(item_id)
+    if not deleted:
+        return jsonify({'error': 'Menu item not found.'}), 404
+    return jsonify({'ok': True})
 
 
 # ── Settings routes ──────────────────────────────────────────────────────────

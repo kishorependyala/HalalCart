@@ -153,6 +153,16 @@ export const readDataFile = (
 export const adminGetMenu = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
   fetch(`${BASE}/api/admin/menu`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<MenuItem[]>(r));
 
+export const addMenuItem = (
+  item: Pick<MenuItem, 'name' | 'category' | 'price' | 'unit' | 'description'>,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/menu`, {
+    method: 'POST',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(item),
+  }).then((r) => parseResponse<MenuItem>(r));
+
 export const updateMenuItem = (
   itemId: string,
   updates: Partial<Pick<MenuItem, 'name' | 'price' | 'unit' | 'description' | 'category'>>,
@@ -163,6 +173,15 @@ export const updateMenuItem = (
     headers: adminHeaders(adminUser),
     body: JSON.stringify(updates),
   }).then((r) => parseResponse<MenuItem>(r));
+
+export const deleteMenuItem = (
+  itemId: string,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/menu/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE',
+    headers: adminHeaders(adminUser),
+  }).then((r) => parseResponse<{ ok: boolean }>(r));
 
 // ── Settings management ───────────────────────────────────────────────────────
 
