@@ -24,6 +24,9 @@ DEFAULT_MENU: list[dict] = [
     {'id': 'c3', 'category': 'Chicken', 'name': 'Boneless Breast',     'price':  5.99, 'unit': 'per lb',  'description': 'Skinless boneless chicken breast'},
     {'id': 'c4', 'category': 'Chicken', 'name': 'Chicken Wings',       'price':  4.50, 'unit': 'per lb',  'description': 'Fresh chicken wings'},
     {'id': 'c5', 'category': 'Chicken', 'name': 'Chicken Keema',       'price':  4.99, 'unit': 'per lb',  'description': 'Ground chicken, great for kebabs'},
+    {'id': 'f1', 'category': 'Fish',    'name': 'Whole Fish',          'price': 14.00, 'unit': 'per fish','description': 'Fresh whole fish, cleaned'},
+    {'id': 'f2', 'category': 'Fish',    'name': 'Fish Fillet',         'price':  8.99, 'unit': 'per lb',  'description': 'Fresh boneless fish fillet'},
+    {'id': 'f3', 'category': 'Fish',    'name': 'Shrimp',              'price': 12.99, 'unit': 'per lb',  'description': 'Fresh shrimp, peeled and deveined'},
 ]
 
 

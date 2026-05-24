@@ -11,7 +11,7 @@ export type User = {
 
 export type MenuItem = {
   id: string;
-  category: 'Goat' | 'Chicken' | 'Snacks';
+  category: 'Goat' | 'Chicken' | 'Fish';
   name: string;
   price: number;
   unit: string;

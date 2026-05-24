@@ -43,6 +43,7 @@ function App() {
   const [showProfile, setShowProfile] = useState(false);
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.qty, 0), [cartItems]);
+  const cartTotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
 
   const tabs = useMemo(() => {
     const base = [...customerTabs];
@@ -225,7 +226,14 @@ function App() {
           </div>
         </section>
 
-        {activeTab === 'menu' ? <MenuTab onAddToCart={addToCart} /> : null}
+        {activeTab === 'menu' ? (
+          <MenuTab
+            onAddToCart={addToCart}
+            cartCount={cartCount}
+            cartTotal={cartTotal}
+            onGoToCart={() => setActiveTab('cart')}
+          />
+        ) : null}
         {activeTab === 'cart' ? (
           <CartTab
             user={user}

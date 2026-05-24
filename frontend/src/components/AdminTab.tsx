@@ -377,7 +377,7 @@ function OrderCard({ order, isBusy, prepEdit, onPrepEditChange, onSavePrepTime, 
 
 // ── Menu Management Panel ─────────────────────────────────────────────────────
 
-const CATEGORIES: MenuItem['category'][] = ['Goat', 'Chicken', 'Snacks'];
+const CATEGORIES: MenuItem['category'][] = ['Goat', 'Chicken', 'Fish'];
 const DELETE_PIN = '1234567';
 
 type NewItemDraft = { name: string; category: MenuItem['category']; price: string; unit: string; description: string };
