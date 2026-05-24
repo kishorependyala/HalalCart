@@ -103,6 +103,7 @@ def create_order():
     items = payload.get('items') or []
     location_id = str(payload.get('locationId', '')).strip()
     location_name = str(payload.get('locationName', '')).strip()
+    is_delivery = bool(payload.get('isDelivery', False))
 
     if not customer_name or not phone or not pickup_time:
         return jsonify({'error': 'Customer name, phone, and pickup time are required.'}), 400
@@ -141,6 +142,8 @@ def create_order():
         'pickupTime': pickup_time,
         'locationId': location_id,
         'locationName': location_name,
+        'isDelivery': is_delivery,
+        'confirmedDeliveryTime': None,
         'items': normalized_items,
         'total': round(total, 2),
         'status': 'Pending',
@@ -184,6 +187,10 @@ def patch_order(order_id: str):
             updates['prepMinutes'] = prep
         except (TypeError, ValueError):
             return jsonify({'error': 'prepMinutes must be a positive integer.'}), 400
+
+    if 'confirmedDeliveryTime' in payload:
+        cdt = payload['confirmedDeliveryTime']
+        updates['confirmedDeliveryTime'] = str(cdt).strip() if cdt else None
 
     updated = update_order(order_id, updates)
     return jsonify(updated)
@@ -418,7 +425,7 @@ def admin_patch_location(loc_id: str):
         return jsonify({'error': 'Admin access required.'}), 403
     payload = request.get_json(silent=True) or {}
     updates: dict = {}
-    for field in ('name', 'address', 'phone', 'hours'):
+    for field in ('name', 'address', 'phone', 'hours', 'deliveryMode'):
         if field in payload:
             updates[field] = payload[field]
     if not updates:

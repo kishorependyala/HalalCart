@@ -33,6 +33,8 @@ export type Order = {
   pickupTime: string;
   locationId?: string;
   locationName?: string;
+  isDelivery?: boolean;
+  confirmedDeliveryTime?: string | null;
   items: OrderItem[];
   total: number;
   status: 'Pending' | 'Accepted' | 'Ready' | 'Completed';
@@ -87,6 +89,7 @@ export const placeOrder = (order: {
   pickupTime: string;
   locationId?: string;
   locationName?: string;
+  isDelivery?: boolean;
   items: OrderItem[];
 }) =>
   fetch(`${BASE}/api/orders`, {
@@ -97,7 +100,7 @@ export const placeOrder = (order: {
 
 export const updateOrder = (
   id: string,
-  updates: { status?: Order['status']; prepMinutes?: number },
+  updates: { status?: Order['status']; prepMinutes?: number; confirmedDeliveryTime?: string | null },
   adminUser: { phone: string; email?: string; authMethod?: string }
 ) =>
   fetch(`${BASE}/api/orders/${id}`, {
@@ -227,6 +230,7 @@ export type StoreLocation = {
   name: string;
   address: string;
   phone: string;
+  deliveryMode?: 'pickup' | 'hourly_delivery';
   /** keys "0"=Sun … "6"=Sat, value null means closed */
   hours: Record<string, DayHours>;
 };

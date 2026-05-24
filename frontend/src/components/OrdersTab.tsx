@@ -122,6 +122,16 @@ export default function OrdersTab({ user, orders, loading, error, onRefresh, onO
               </div>
             ) : null}
 
+            {order.isDelivery && order.confirmedDeliveryTime ? (
+              <div style={{ marginTop: '0.5rem', background: '#f0fdf4', borderRadius: '0.6rem', padding: '0.5rem 0.75rem', color: '#16a34a', fontWeight: 700, fontSize: '0.9rem' }}>
+                🚗 Delivery confirmed: {order.confirmedDeliveryTime}
+              </div>
+            ) : order.isDelivery ? (
+              <div style={{ marginTop: '0.5rem', background: '#fef3c7', borderRadius: '0.6rem', padding: '0.5rem 0.75rem', color: '#92400e', fontWeight: 700, fontSize: '0.85rem' }}>
+                🚗 Delivery order — store will confirm exact delivery time
+              </div>
+            ) : null}
+
             {order.status === 'Ready' ? (
               <div style={{ marginTop: '0.5rem', background: '#dcfce7', borderRadius: '0.6rem', padding: '0.5rem 0.75rem', color: '#166534', fontWeight: 700, fontSize: '0.9rem' }}>
                 🎉 Your order is ready for pickup!
@@ -138,7 +148,7 @@ export default function OrdersTab({ user, orders, loading, error, onRefresh, onO
             </div>
 
             <div style={{ marginTop: '0.9rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', color: '#92400e', fontWeight: 600 }}>
-              <span>Pickup: {order.pickupTime}</span>
+              <span>{order.isDelivery ? '🚗 Delivery' : '📍 Pickup'}: {order.pickupTime}{order.locationName ? ` @ ${order.locationName}` : ''}</span>
               <span>Total: ${order.total.toFixed(2)}</span>
             </div>
           </div>

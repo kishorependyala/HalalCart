@@ -271,6 +271,7 @@ DEFAULT_LOCATIONS: list[dict] = [
         'name': 'Monroe Township',
         'address': '355 Applegarth Rd, Monroe Township, NJ 08831',
         'phone': '(609) 235-9158',
+        'deliveryMode': 'pickup',
         'hours': {
             '0': {'open': '10:00', 'close': '18:00'},
             '1': {'open': '10:00', 'close': '20:00'},
@@ -286,6 +287,7 @@ DEFAULT_LOCATIONS: list[dict] = [
         'name': 'Location 2',
         'address': 'Address TBD — update in Admin',
         'phone': '',
+        'deliveryMode': 'hourly_delivery',
         'hours': {
             '0': {'open': '10:00', 'close': '18:00'},
             '1': {'open': '10:00', 'close': '20:00'},
@@ -338,7 +340,7 @@ def update_location(loc_id: str, updates: dict[str, Any]) -> Optional[dict[str, 
     locations = load_locations()
     for loc in locations:
         if loc['id'] == loc_id:
-            for key in ('name', 'address', 'phone', 'hours'):
+            for key in ('name', 'address', 'phone', 'hours', 'deliveryMode'):
                 if key in updates:
                     loc[key] = updates[key]
             save_locations(locations)

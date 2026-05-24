@@ -251,6 +251,13 @@ function HoursPanel({ adminUser }: { adminUser: User }) {
     setEditDraft((d) => ({ ...d, [locId]: { ...d[locId], [field]: value } }));
   };
 
+  const toggleDeliveryMode = (locId: string) => {
+    setEditDraft((d) => {
+      const current = d[locId]?.deliveryMode ?? 'pickup';
+      return { ...d, [locId]: { ...d[locId], deliveryMode: current === 'pickup' ? 'hourly_delivery' : 'pickup' } };
+    });
+  };
+
   const setDraftHours = (locId: string, dayIdx: number, field: 'open' | 'close', value: string) => {
     setEditDraft((d) => {
       const loc = { ...d[locId] };
@@ -275,7 +282,7 @@ function HoursPanel({ adminUser }: { adminUser: User }) {
     if (!draft) return;
     setSaving(locId);
     try {
-      const updated = await updateLocation(locId, { name: draft.name, address: draft.address, phone: draft.phone, hours: draft.hours }, adminUser);
+      const updated = await updateLocation(locId, { name: draft.name, address: draft.address, phone: draft.phone, hours: draft.hours, deliveryMode: draft.deliveryMode ?? 'pickup' }, adminUser);
       setLocations((ls) => ls.map((l) => l.id === locId ? updated : l));
       setExpandedId(null);
     } catch (err) {
@@ -322,6 +329,9 @@ function HoursPanel({ adminUser }: { adminUser: User }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 0.75rem' }}>
               <button type="button" onClick={() => openEditor(loc)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <span style={{ fontWeight: 800, color: '#78350f' }}>{loc.name}</span>
+                <span style={{ fontSize: '0.75rem', background: loc.deliveryMode === 'hourly_delivery' ? '#dcfce7' : '#e5e7eb', color: loc.deliveryMode === 'hourly_delivery' ? '#16a34a' : '#6b7280', borderRadius: 999, padding: '0.1rem 0.5rem', fontWeight: 700, flexShrink: 0 }}>
+                  {loc.deliveryMode === 'hourly_delivery' ? '🚗 Delivery' : '🏪 Pickup'}
+                </span>
                 <span style={{ fontSize: '0.8rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{loc.address}</span>
                 <span style={{ color: '#9ca3af', fontSize: '0.7rem', marginLeft: 'auto' }}>{isOpen ? '▲' : '▼'}</span>
               </button>
@@ -343,6 +353,27 @@ function HoursPanel({ adminUser }: { adminUser: User }) {
                 <div>
                   <label style={S.label}>Address</label>
                   <input value={draft.address} onChange={(e) => setDraftField(loc.id, 'address', e.target.value)} style={S.inp} />
+                </div>
+
+                {/* Delivery mode toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.75rem', background: '#fef3c7', borderRadius: '0.6rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, color: '#78350f', fontSize: '0.88rem' }}>
+                      {draft.deliveryMode === 'hourly_delivery' ? '🚗 Hourly Delivery' : '🏪 Pickup Only'}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#92400e' }}>
+                      {draft.deliveryMode === 'hourly_delivery'
+                        ? 'Customers select next hourly slot — admin confirms exact time'
+                        : 'Customers schedule their own pickup time'}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleDeliveryMode(loc.id)}
+                    style={{ background: draft.deliveryMode === 'hourly_delivery' ? '#16a34a' : '#6b7280', color: '#fff', border: 'none', borderRadius: 999, padding: '0.35rem 0.9rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const }}
+                  >
+                    {draft.deliveryMode === 'hourly_delivery' ? 'Switch to Pickup' : 'Enable Delivery'}
+                  </button>
                 </div>
 
                 <div>
@@ -426,6 +457,7 @@ function OrdersPanel({ adminUser }: { adminUser: User }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [prepEdits, setPrepEdits] = useState<Record<string, string>>({});
+  const [deliveryTimeEdits, setDeliveryTimeEdits] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   const loadOrders = useCallback(async () => {
@@ -447,7 +479,7 @@ function OrdersPanel({ adminUser }: { adminUser: User }) {
     return () => clearInterval(interval);
   }, [loadOrders]);
 
-  const patchOrder = async (id: string, updates: { status?: Order['status']; prepMinutes?: number }) => {
+  const patchOrder = async (id: string, updates: { status?: Order['status']; prepMinutes?: number; confirmedDeliveryTime?: string | null }) => {
     setBusy((b) => ({ ...b, [id]: true }));
     try {
       const updated = await updateOrder(id, updates, adminUser);
@@ -465,6 +497,13 @@ function OrdersPanel({ adminUser }: { adminUser: User }) {
     if (!raw || isNaN(val) || val < 1) return;
     patchOrder(order.id, { prepMinutes: val });
     setPrepEdits((e) => { const next = { ...e }; delete next[order.id]; return next; });
+  };
+
+  const saveDeliveryTime = (order: Order) => {
+    const raw = deliveryTimeEdits[order.id]?.trim();
+    if (!raw) return;
+    patchOrder(order.id, { confirmedDeliveryTime: raw });
+    setDeliveryTimeEdits((e) => { const next = { ...e }; delete next[order.id]; return next; });
   };
 
   const activeOrders = orders.filter((o) => o.status !== 'Completed');
@@ -489,8 +528,11 @@ function OrdersPanel({ adminUser }: { adminUser: User }) {
           order={order}
           isBusy={!!busy[order.id]}
           prepEdit={prepEdits[order.id] ?? ''}
+          deliveryTimeEdit={deliveryTimeEdits[order.id] ?? ''}
           onPrepEditChange={(v) => setPrepEdits((e) => ({ ...e, [order.id]: v }))}
+          onDeliveryTimeChange={(v) => setDeliveryTimeEdits((e) => ({ ...e, [order.id]: v }))}
           onSavePrepTime={() => savePrepTime(order)}
+          onSaveDeliveryTime={() => saveDeliveryTime(order)}
           onAccept={() => patchOrder(order.id, { status: 'Accepted' })}
           onMarkReady={() => patchOrder(order.id, { status: 'Ready' })}
           onComplete={() => patchOrder(order.id, { status: 'Completed' })}
@@ -509,8 +551,11 @@ function OrdersPanel({ adminUser }: { adminUser: User }) {
                 order={order}
                 isBusy={!!busy[order.id]}
                 prepEdit={prepEdits[order.id] ?? ''}
+                deliveryTimeEdit={deliveryTimeEdits[order.id] ?? ''}
                 onPrepEditChange={(v) => setPrepEdits((e) => ({ ...e, [order.id]: v }))}
+                onDeliveryTimeChange={(v) => setDeliveryTimeEdits((e) => ({ ...e, [order.id]: v }))}
                 onSavePrepTime={() => savePrepTime(order)}
+                onSaveDeliveryTime={() => saveDeliveryTime(order)}
                 onAccept={() => patchOrder(order.id, { status: 'Accepted' })}
                 onMarkReady={() => patchOrder(order.id, { status: 'Ready' })}
                 onComplete={() => patchOrder(order.id, { status: 'Completed' })}
@@ -527,26 +572,59 @@ type CardProps = {
   order: Order;
   isBusy: boolean;
   prepEdit: string;
+  deliveryTimeEdit: string;
   onPrepEditChange: (v: string) => void;
+  onDeliveryTimeChange: (v: string) => void;
   onSavePrepTime: () => void;
+  onSaveDeliveryTime: () => void;
   onAccept: () => void;
   onMarkReady: () => void;
   onComplete: () => void;
 };
 
-function OrderCard({ order, isBusy, prepEdit, onPrepEditChange, onSavePrepTime, onAccept, onMarkReady, onComplete }: CardProps) {
+function OrderCard({ order, isBusy, prepEdit, deliveryTimeEdit, onPrepEditChange, onDeliveryTimeChange, onSavePrepTime, onSaveDeliveryTime, onAccept, onMarkReady, onComplete }: CardProps) {
   const displayPrep = prepEdit !== '' ? prepEdit : String(order.prepMinutes ?? '');
+  const isDelivery = order.isDelivery;
 
   return (
     <div style={{ border: '1px solid #fed7aa', borderRadius: '0.95rem', padding: '1rem', background: '#fffbeb' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontWeight: 800, color: '#78350f' }}>Order #{order.id.slice(-8).toUpperCase()}</div>
+          <div style={{ fontWeight: 800, color: '#78350f', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            Order #{order.id.slice(-8).toUpperCase()}
+            {isDelivery && <span style={{ background: '#dcfce7', color: '#16a34a', borderRadius: 999, padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 700 }}>🚗 Delivery</span>}
+          </div>
           <p style={mutedText}>{order.customerName} · {order.phone}</p>
-          <p style={{ ...mutedText, marginTop: '0.2rem' }}>Pickup: {order.pickupTime}</p>
+          <p style={{ ...mutedText, marginTop: '0.2rem' }}>
+            {isDelivery ? '📦 Requested:' : '📍 Pickup:'} {order.pickupTime}
+            {order.locationName ? <span style={{ marginLeft: '0.4rem', color: '#78350f' }}>@ {order.locationName}</span> : null}
+          </p>
+          {isDelivery && order.confirmedDeliveryTime && (
+            <p style={{ ...mutedText, marginTop: '0.2rem', color: '#16a34a', fontWeight: 700 }}>
+              ✅ Confirmed delivery: {order.confirmedDeliveryTime}
+            </p>
+          )}
         </div>
         <span style={statusBadge(order.status)}>{order.status}</span>
       </div>
+
+      {/* Delivery time confirmation — show for delivery orders */}
+      {isDelivery && (
+        <div style={{ marginTop: '0.75rem', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '0.6rem', padding: '0.6rem 0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' as const }}>
+          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#16a34a', flexShrink: 0 }}>🚗 Confirm delivery time:</span>
+          <input
+            type="text"
+            value={deliveryTimeEdit !== '' ? deliveryTimeEdit : (order.confirmedDeliveryTime ?? '')}
+            onChange={(e) => onDeliveryTimeChange(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onSaveDeliveryTime()}
+            placeholder="e.g. 3:00 PM today"
+            style={{ ...S.inp, flex: 1, minWidth: 150, padding: '0.3rem 0.5rem', fontSize: '0.82rem' }}
+          />
+          <button type="button" onClick={onSaveDeliveryTime} disabled={isBusy} style={{ ...S.primaryBtn, background: '#16a34a', fontSize: '0.82rem', padding: '0.35rem 0.75rem', opacity: isBusy ? 0.6 : 1, flexShrink: 0 }}>
+            Confirm
+          </button>
+        </div>
+      )}
 
       <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.35rem' }}>
         {order.items.map((item) => (

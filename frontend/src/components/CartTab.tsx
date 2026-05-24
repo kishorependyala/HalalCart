@@ -18,6 +18,19 @@ type Props = {
   prepMinutes?: number;
 };
 
+/**
+ * Round a Date up to the next full hour
+ */
+function roundUpToNextHour(date: Date): Date {
+  const result = new Date(date);
+  if (result.getMinutes() > 0 || result.getSeconds() > 0) {
+    result.setHours(result.getHours() + 1, 0, 0, 0);
+  } else {
+    result.setMinutes(0, 0, 0);
+  }
+  return result;
+}
+
 /** Round a Date up to the nearest N-minute boundary */
 function roundUpMinutes(date: Date, step = 15): Date {
   const ms = step * 60 * 1000;
@@ -34,6 +47,46 @@ function fmtHHMM(hhmm: string): string {
 
 function fmtDateShort(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+/**
+ * Next hourly delivery slot: now + prepMins rounded up to next full hour, within location hours.
+ */
+function getNextHourlySlot(loc: StoreLocation, prepMins: number): { date: Date; label: string } | null {
+  const earliest = roundUpToNextHour(new Date(Date.now() + prepMins * 60_000));
+
+  for (let daysAhead = 0; daysAhead < 7; daysAhead++) {
+    const candidate = new Date(earliest);
+    candidate.setDate(earliest.getDate() + daysAhead);
+    if (daysAhead > 0) candidate.setHours(0, 0, 0, 0);
+
+    const dayKey = String(candidate.getDay());
+    const dayHours = loc.hours[dayKey];
+    if (!dayHours) continue;
+
+    const [openH, openM] = (dayHours as { open: string; close: string }).open.split(':').map(Number);
+    const [closeH, closeM] = (dayHours as { open: string; close: string }).close.split(':').map(Number);
+
+    const openTime = new Date(candidate); openTime.setHours(openH, openM, 0, 0);
+    const closeTime = new Date(candidate); closeTime.setHours(closeH, closeM, 0, 0);
+
+    let slotTime: Date;
+    if (daysAhead === 0) {
+      if (candidate >= closeTime) continue;
+      slotTime = candidate < openTime ? openTime : candidate;
+    } else {
+      slotTime = openTime;
+    }
+    // Snap to next full hour if not on the hour
+    if (slotTime.getMinutes() !== 0) slotTime = roundUpToNextHour(slotTime);
+    if (slotTime >= closeTime) continue;
+
+    const isToday = slotTime.toDateString() === new Date().toDateString();
+    const dateLabel = isToday ? 'today' : fmtDateShort(slotTime);
+    const timeLabel = slotTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return { date: slotTime, label: `~${timeLabel} ${dateLabel}` };
+  }
+  return null;
 }
 
 /**
@@ -84,10 +137,12 @@ function buildPickupSlots(dateValue: string, loc: StoreLocation | null): string[
   if (!dayHours) return [];
   const [openH] = (dayHours as { open: string; close: string }).open.split(':').map(Number);
   const [closeH] = (dayHours as { open: string; close: string }).close.split(':').map(Number);
+  const isHourly = loc.deliveryMode === 'hourly_delivery';
   const slots: string[] = [];
   for (let hour = openH; hour <= closeH; hour++) {
     slots.push(fmtHHMM(`${String(hour).padStart(2, '0')}:00`));
-    if (hour !== closeH) slots.push(fmtHHMM(`${String(hour).padStart(2, '0')}:30`));
+    // Only add :30 slots for pickup locations
+    if (!isHourly && hour !== closeH) slots.push(fmtHHMM(`${String(hour).padStart(2, '0')}:30`));
   }
   return slots;
 }
@@ -117,9 +172,16 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
 
   const selectedLoc = useMemo(() => locations.find((l) => l.id === selectedLocId) ?? null, [locations, selectedLocId]);
 
+  const isDelivery = selectedLoc?.deliveryMode === 'hourly_delivery';
+
   const tentativeSlot = useMemo(
-    () => selectedLoc ? getNextPickupSlot(selectedLoc, prepMinutes) : null,
-    [selectedLoc, prepMinutes]
+    () => {
+      if (!selectedLoc) return null;
+      return isDelivery
+        ? getNextHourlySlot(selectedLoc, prepMinutes)
+        : getNextPickupSlot(selectedLoc, prepMinutes);
+    },
+    [selectedLoc, prepMinutes, isDelivery]
   );
 
   const subtotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
@@ -144,6 +206,7 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
         pickupTime: `${pickupDate} ${pickupTime}`,
         locationId: selectedLocId,
         locationName: selectedLoc?.name ?? '',
+        isDelivery,
         items: cartItems.map(({ id, name, qty, price }) => ({ id, name, qty, price })),
       });
       onOrderPlaced(order);
@@ -246,11 +309,17 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
 
         {/* Tentative time banner */}
         {selectedLoc && tentativeSlot && (
-          <div style={{ background: '#dbeafe', border: '1px solid #93c5fd', borderRadius: '0.65rem', padding: '0.6rem 0.9rem', marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '1.1rem' }}>⏱</span>
+          <div style={{ background: isDelivery ? '#f0fdf4' : '#dbeafe', border: `1px solid ${isDelivery ? '#86efac' : '#93c5fd'}`, borderRadius: '0.65rem', padding: '0.6rem 0.9rem', marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+            <span style={{ fontSize: '1.1rem' }}>{isDelivery ? '🚗' : '⏱'}</span>
             <div>
-              <span style={{ fontWeight: 800, color: '#1e40af' }}>Next available: {tentativeSlot.label}</span>
-              <span style={{ color: '#3b82f6', fontSize: '0.8rem', display: 'block' }}>Tentative — confirmed once store accepts your order</span>
+              <span style={{ fontWeight: 800, color: isDelivery ? '#16a34a' : '#1e40af' }}>
+                Next {isDelivery ? 'delivery' : 'available'}: {tentativeSlot.label}
+              </span>
+              <span style={{ color: isDelivery ? '#15803d' : '#3b82f6', fontSize: '0.8rem', display: 'block' }}>
+                {isDelivery
+                  ? 'Hourly delivery slot — store will confirm exact time'
+                  : 'Tentative — confirmed once store accepts your order'}
+              </span>
             </div>
           </div>
         )}
@@ -282,20 +351,20 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
 
               <div style={{ display: 'grid', gap: '0.9rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
                 <div>
-                  <label htmlFor="pickupDate" style={S.label}>Pickup Date</label>
+                  <label htmlFor="pickupDate" style={S.label}>{isDelivery ? 'Delivery Date' : 'Pickup Date'}</label>
                   <input id="pickupDate" type="date" value={pickupDate} min={new Date().toISOString().split('T')[0]} onChange={(e) => setPickupDate(e.target.value)} style={S.inp} />
                 </div>
                 <div>
-                  <label htmlFor="pickupTime" style={S.label}>Pickup Time</label>
+                  <label htmlFor="pickupTime" style={S.label}>{isDelivery ? 'Delivery Slot' : 'Pickup Time'}</label>
                   <select id="pickupTime" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} style={S.inp}>
-                    <option value="">Select a time</option>
+                    <option value="">Select {isDelivery ? 'a delivery slot' : 'a time'}</option>
                     {pickupSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
                   </select>
                 </div>
               </div>
 
               <button type="submit" disabled={submitting} style={{ ...S.primaryBtn, opacity: submitting ? 0.7 : 1 }}>
-                {submitting ? 'Placing Order...' : 'Place Order'}
+                {submitting ? 'Placing Order...' : isDelivery ? '🚗 Place Delivery Order' : 'Place Order'}
               </button>
             </form>
           </>
