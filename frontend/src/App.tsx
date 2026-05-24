@@ -219,7 +219,7 @@ function App() {
       <main style={{ maxWidth: 680, margin: '0 auto', padding: '1rem' }}>
         <section style={S.card}>
           <div style={{ display: 'grid', gap: '0.35rem' }}>
-            <div style={{ color: '#78350f', fontSize: '1.15rem', fontWeight: 800 }}>Fresh halal meats and Indian-style snacks</div>
+            <div style={{ color: '#78350f', fontSize: '1.15rem', fontWeight: 800 }}>Fresh halal meats</div>
             <div style={{ color: '#6b7280' }}>
               Call <a href="tel:+16092359158" style={{ color: '#d97706', fontWeight: 700 }}>(609) 235-9158</a> · Sun–Sat pickup hours: 10 AM – 8 PM (Mon–Sat), 10 AM – 6 PM (Sun)
             </div>
