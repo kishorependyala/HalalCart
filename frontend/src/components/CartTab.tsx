@@ -98,24 +98,49 @@ function buildQuickSlots(loc: StoreLocation, prepMins: number, count = 5): TimeS
   return slots;
 }
 
-/** Build all time options for the custom date picker */
-function buildCustomSlots(dateValue: string, loc: StoreLocation | null): string[] {
-  if (!loc || !dateValue) return [];
-  const selectedDate = new Date(`${dateValue}T12:00:00`);
+type DayOption = { dateStr: string; dayLabel: string; shortLabel: string; isOpen: boolean };
+type TimeOption = { label: string; value: string };
+
+/** Build next N day options (starting today) for the custom picker */
+function buildCustomDays(loc: StoreLocation | null, count = 10): DayOption[] {
+  if (!loc) return [];
+  const result: DayOption[] = [];
+  const today = new Date();
+  for (let i = 0; i < count; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const dateStr = d.toLocaleDateString('en-CA');
+    const dayKey = String(d.getDay());
+    const isOpen = !!loc.hours[dayKey];
+    const shortLabel = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'short' });
+    const dayLabelStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    result.push({ dateStr, dayLabel: dayLabelStr, shortLabel, isOpen });
+  }
+  return result;
+}
+
+/** Build time slots for a specific date in the custom picker */
+function buildCustomTimeSlots(dateStr: string, loc: StoreLocation | null): TimeOption[] {
+  if (!loc || !dateStr) return [];
+  const selectedDate = new Date(`${dateStr}T12:00:00`);
   const dayKey = String(selectedDate.getDay());
-  const dayHours = loc.hours[dayKey];
+  const dayHours = loc.hours[dayKey] as { open: string; close: string } | null;
   if (!dayHours) return [];
-  const [openH] = (dayHours as { open: string; close: string }).open.split(':').map(Number);
-  const [closeH] = (dayHours as { open: string; close: string }).close.split(':').map(Number);
+  const [openH, openM] = dayHours.open.split(':').map(Number);
+  const [closeH, closeM] = dayHours.close.split(':').map(Number);
   const isHourly = loc.deliveryMode === 'hourly_delivery';
-  const result: string[] = [];
-  for (let h = openH; h <= closeH; h++) {
-    const t = new Date(); t.setHours(h, 0, 0, 0);
-    result.push(t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
-    if (!isHourly && h < closeH) {
-      const t2 = new Date(); t2.setHours(h, 30, 0, 0);
-      result.push(t2.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
-    }
+  const result: TimeOption[] = [];
+  // Build a cursor starting at open time
+  const base = new Date(selectedDate);
+  base.setHours(openH, openM, 0, 0);
+  const closeMs = new Date(selectedDate);
+  closeMs.setHours(closeH, closeM, 0, 0);
+  const stepMins = isHourly ? 60 : 30;
+  const cursor = new Date(base);
+  while (cursor <= closeMs) {
+    const label = cursor.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    result.push({ label, value: `${dateStr} ${label}` });
+    cursor.setMinutes(cursor.getMinutes() + stepMins);
   }
   return result;
 }
@@ -162,14 +187,13 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
     [selectedLoc, prepMinutes]
   );
 
-  const customSlots = useMemo(
-    () => buildCustomSlots(customDate, selectedLoc),
-    [customDate, selectedLoc]
-  );
+  const customDays = useMemo(() => buildCustomDays(selectedLoc, 10), [selectedLoc]);
+  const customTimeSlots = useMemo(() => buildCustomTimeSlots(customDate, selectedLoc), [customDate, selectedLoc]);
 
   // When custom date/time both filled, update selectedTimeValue
   useEffect(() => {
     if (showCustom && customDate && customTime) {
+      // selectedTimeValue already set by pill click; this handles edge case of date change
       setSelectedTimeValue(`${customDate} ${customTime}`);
     }
   }, [showCustom, customDate, customTime]);
@@ -363,34 +387,77 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
               </button>
             </div>
 
-            {/* Custom date + time picker */}
+            {/* Custom date + time picker — pill-based */}
             {showCustom && (
-              <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', background: '#fffbeb', border: '1px solid #fed7aa', borderRadius: '0.65rem', padding: '0.75rem' }}>
+              <div style={{ background: '#fffbeb', border: '1px solid #fed7aa', borderRadius: '0.75rem', padding: '0.75rem', display: 'grid', gap: '0.6rem' }}>
+                {/* Day pills */}
                 <div>
-                  <label style={S.label}>{isDelivery ? 'Delivery Date' : 'Pickup Date'}</label>
-                  <input
-                    type="date"
-                    value={customDate}
-                    min={new Date().toISOString().split('T')[0]}
-                    onChange={(e) => { setCustomDate(e.target.value); setCustomTime(''); }}
-                    style={S.inp}
-                  />
+                  <p style={{ ...S.label, marginBottom: '0.35rem' }}>Choose a day</p>
+                  <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    {customDays.map((day) => {
+                      const active = customDate === day.dateStr;
+                      return (
+                        <button
+                          key={day.dateStr}
+                          type="button"
+                          disabled={!day.isOpen}
+                          onClick={() => { setCustomDate(day.dateStr); setCustomTime(''); }}
+                          style={{
+                            background: active ? '#f59e0b' : day.isOpen ? '#fff' : '#f3f4f6',
+                            color: active ? '#fff' : day.isOpen ? '#78350f' : '#9ca3af',
+                            border: `2px solid ${active ? '#f59e0b' : day.isOpen ? '#fed7aa' : '#e5e7eb'}`,
+                            borderRadius: '0.6rem',
+                            padding: '0.35rem 0.65rem',
+                            cursor: day.isOpen ? 'pointer' : 'not-allowed',
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            lineHeight: 1.3,
+                            textAlign: 'center',
+                            textDecoration: day.isOpen ? 'none' : 'line-through',
+                          }}
+                        >
+                          <div>{day.shortLabel}</div>
+                          <div style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.8 }}>{day.dayLabel}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div>
-                  <label style={S.label}>{isDelivery ? 'Delivery Slot' : 'Pickup Time'}</label>
-                  <select
-                    value={customTime}
-                    onChange={(e) => setCustomTime(e.target.value)}
-                    style={S.inp}
-                    disabled={!customDate}
-                  >
-                    <option value="">Select a time</option>
-                    {customSlots.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  {customDate && customSlots.length === 0 && (
-                    <p style={{ ...mutedText, fontSize: '0.78rem', marginTop: '0.3rem' }}>Closed on this day — pick another date.</p>
-                  )}
-                </div>
+
+                {/* Time pills */}
+                {customDate && (
+                  <div>
+                    <p style={{ ...S.label, marginBottom: '0.35rem' }}>Choose a time</p>
+                    {customTimeSlots.length === 0 ? (
+                      <p style={{ ...mutedText, fontSize: '0.78rem' }}>Closed on this day — pick another date.</p>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        {customTimeSlots.map((slot) => {
+                          const active = selectedTimeValue === slot.value;
+                          return (
+                            <button
+                              key={slot.value}
+                              type="button"
+                              onClick={() => { setCustomTime(slot.label); setSelectedTimeValue(slot.value); }}
+                              style={{
+                                background: active ? '#f59e0b' : '#fff',
+                                color: active ? '#fff' : '#78350f',
+                                border: `2px solid ${active ? '#f59e0b' : '#fed7aa'}`,
+                                borderRadius: '0.6rem',
+                                padding: '0.35rem 0.65rem',
+                                cursor: 'pointer',
+                                fontWeight: 700,
+                                fontSize: '0.82rem',
+                              }}
+                            >
+                              {slot.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
