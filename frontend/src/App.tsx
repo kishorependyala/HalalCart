@@ -45,6 +45,13 @@ function App() {
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.qty, 0), [cartItems]);
   const cartTotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
+  const cartPrepMinutes = useMemo(() => {
+    const hasGoat = cartItems.some((i) => i.id.startsWith('g'));
+    const hasChicken = cartItems.some((i) => i.id.startsWith('c'));
+    if (hasGoat) return 45;
+    if (hasChicken) return 20;
+    return 20;
+  }, [cartItems]);
 
   const tabs = useMemo(() => {
     const base = [...customerTabs];
@@ -248,7 +255,7 @@ function App() {
           <div style={{ display: 'grid', gap: '0.35rem' }}>
             <div style={{ color: '#78350f', fontSize: '1.15rem', fontWeight: 800 }}>Fresh halal meats</div>
             <div style={{ color: '#6b7280' }}>
-              Call <a href="tel:+16092359158" style={{ color: '#d97706', fontWeight: 700 }}>(609) 235-9158</a> · Sun–Sat pickup hours: 10 AM – 8 PM (Mon–Sat), 10 AM – 6 PM (Sun)
+              Call <a href="tel:+16092359158" style={{ color: '#d97706', fontWeight: 700 }}>(609) 235-9158</a> · Pickup only · 2 locations
             </div>
           </div>
         </section>
@@ -269,6 +276,7 @@ function App() {
             onRemoveItem={removeItem}
             onOrderPlaced={handleOrderPlaced}
             onLoginRequest={() => setShowLogin(true)}
+            prepMinutes={cartPrepMinutes}
           />
         ) : null}
         {activeTab === 'orders' ? (

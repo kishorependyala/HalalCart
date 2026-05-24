@@ -5,10 +5,15 @@ import {
   AdminUser,
   AppSettings,
   DataFileEntry,
+  DayHours,
   MenuItem,
+  StoreLocation,
   addAdmin,
+  addLocation,
   addMenuItem,
+  adminGetLocations,
   adminGetMenu,
+  deleteLocation,
   deleteMenuItem,
   getAdminUsers,
   getAdmins,
@@ -18,6 +23,7 @@ import {
   Order,
   readDataFile,
   removeAdmin,
+  updateLocation,
   updateMenuItem,
   updateOrder,
   updateSettings,
@@ -25,7 +31,7 @@ import {
 } from '../api';
 import { S, mutedText, sectionTitle } from '../theme';
 
-type AdminSubTab = 'orders' | 'users' | 'menu' | 'data' | 'admins';
+type AdminSubTab = 'orders' | 'users' | 'menu' | 'hours' | 'data' | 'admins';
 
 type Props = {
   adminUser: User;
@@ -58,6 +64,7 @@ export default function AdminTab({ adminUser, onViewAsUser }: Props) {
     { id: 'orders', label: 'Orders', emoji: '📋' },
     { id: 'users',  label: 'Users',  emoji: '👥' },
     { id: 'menu',   label: 'Menu',   emoji: '🍖' },
+    { id: 'hours',  label: 'Hours',  emoji: '🏪' },
     { id: 'data',   label: 'Data',   emoji: '📁' },
     { id: 'admins', label: 'Admins', emoji: '🛡️' },
   ];
@@ -94,6 +101,7 @@ export default function AdminTab({ adminUser, onViewAsUser }: Props) {
       {subTab === 'orders' && <OrdersPanel adminUser={adminUser} />}
       {subTab === 'users'  && <UsersPanel  adminUser={adminUser} onViewAsUser={onViewAsUser} />}
       {subTab === 'menu'   && <MenuPanel   adminUser={adminUser} />}
+      {subTab === 'hours'  && <HoursPanel  adminUser={adminUser} />}
       {subTab === 'data'   && <DataPanel   adminUser={adminUser} />}
       {subTab === 'admins' && <AdminsPanel adminUser={adminUser} />}
     </div>
@@ -205,6 +213,208 @@ function UsersPanel({ adminUser, onViewAsUser }: { adminUser: User; onViewAsUser
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Hours / Locations Panel ───────────────────────────────────────────────────
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function HoursPanel({ adminUser }: { adminUser: User }) {
+  const [locations, setLocations] = useState<StoreLocation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Record<string, StoreLocation>>({});
+  const [addingNew, setAddingNew] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newAddress, setNewAddress] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    adminGetLocations(adminUser)
+      .then((locs) => { setLocations(locs); })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load locations.'))
+      .finally(() => setLoading(false));
+  }, [adminUser]);
+
+  const openEditor = (loc: StoreLocation) => {
+    if (expandedId === loc.id) { setExpandedId(null); return; }
+    setExpandedId(loc.id);
+    setEditDraft((d) => ({ ...d, [loc.id]: JSON.parse(JSON.stringify(loc)) }));
+  };
+
+  const setDraftField = (locId: string, field: keyof StoreLocation, value: string) => {
+    setEditDraft((d) => ({ ...d, [locId]: { ...d[locId], [field]: value } }));
+  };
+
+  const setDraftHours = (locId: string, dayIdx: number, field: 'open' | 'close', value: string) => {
+    setEditDraft((d) => {
+      const loc = { ...d[locId] };
+      const hours = { ...loc.hours };
+      const existing = hours[String(dayIdx)] ?? { open: '10:00', close: '20:00' };
+      hours[String(dayIdx)] = { ...(existing as { open: string; close: string }), [field]: value };
+      return { ...d, [locId]: { ...loc, hours } };
+    });
+  };
+
+  const toggleDayClosed = (locId: string, dayIdx: number) => {
+    setEditDraft((d) => {
+      const loc = { ...d[locId] };
+      const hours = { ...loc.hours };
+      hours[String(dayIdx)] = hours[String(dayIdx)] ? null : { open: '10:00', close: '20:00' };
+      return { ...d, [locId]: { ...loc, hours } };
+    });
+  };
+
+  const saveLocation = async (locId: string) => {
+    const draft = editDraft[locId];
+    if (!draft) return;
+    setSaving(locId);
+    try {
+      const updated = await updateLocation(locId, { name: draft.name, address: draft.address, phone: draft.phone, hours: draft.hours }, adminUser);
+      setLocations((ls) => ls.map((l) => l.id === locId ? updated : l));
+      setExpandedId(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save.');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleDeleteLocation = async (locId: string) => {
+    if (!window.confirm('Delete this location?')) return;
+    try {
+      await deleteLocation(locId, adminUser);
+      setLocations((ls) => ls.filter((l) => l.id !== locId));
+      if (expandedId === locId) setExpandedId(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete.');
+    }
+  };
+
+  const handleAddLocation = async () => {
+    if (!newName.trim()) return;
+    try {
+      const loc = await addLocation({ name: newName.trim(), address: newAddress.trim(), phone: newPhone.trim(), hours: { '0': { open: '10:00', close: '18:00' }, '1': { open: '10:00', close: '20:00' }, '2': { open: '10:00', close: '20:00' }, '3': { open: '10:00', close: '20:00' }, '4': { open: '10:00', close: '20:00' }, '5': { open: '10:00', close: '20:00' }, '6': { open: '10:00', close: '20:00' } } }, adminUser);
+      setLocations((ls) => [...ls, loc]);
+      setNewName(''); setNewAddress(''); setNewPhone(''); setAddingNew(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add location.');
+    }
+  };
+
+  if (loading) return <div style={S.card}>Loading locations…</div>;
+  if (error) return <div style={{ ...S.card, ...S.errorBox }}>{error}</div>;
+
+  return (
+    <div style={{ display: 'grid', gap: '0.75rem' }}>
+      <p style={mutedText}>{locations.length} location{locations.length !== 1 ? 's' : ''}. Click a location to edit hours.</p>
+
+      {locations.map((loc) => {
+        const draft = editDraft[loc.id] ?? loc;
+        const isOpen = expandedId === loc.id;
+        return (
+          <div key={loc.id} style={{ border: '1px solid #fed7aa', borderRadius: '0.75rem', background: '#fffbeb', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.65rem 0.75rem' }}>
+              <button type="button" onClick={() => openEditor(loc)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <span style={{ fontWeight: 800, color: '#78350f' }}>{loc.name}</span>
+                <span style={{ fontSize: '0.8rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{loc.address}</span>
+                <span style={{ color: '#9ca3af', fontSize: '0.7rem', marginLeft: 'auto' }}>{isOpen ? '▲' : '▼'}</span>
+              </button>
+              <button type="button" onClick={() => handleDeleteLocation(loc.id)} style={{ ...S.dangerBtn, padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}>✕</button>
+            </div>
+
+            {isOpen && (
+              <div style={{ borderTop: '1px solid #fde68a', padding: '0.75rem', background: '#fffef5', display: 'grid', gap: '0.75rem' }}>
+                <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                  <div>
+                    <label style={S.label}>Name</label>
+                    <input value={draft.name} onChange={(e) => setDraftField(loc.id, 'name', e.target.value)} style={S.inp} />
+                  </div>
+                  <div>
+                    <label style={S.label}>Phone</label>
+                    <input value={draft.phone} onChange={(e) => setDraftField(loc.id, 'phone', e.target.value)} style={S.inp} placeholder="(609) 555-0000" />
+                  </div>
+                </div>
+                <div>
+                  <label style={S.label}>Address</label>
+                  <input value={draft.address} onChange={(e) => setDraftField(loc.id, 'address', e.target.value)} style={S.inp} />
+                </div>
+
+                <div>
+                  <p style={{ ...S.label, marginBottom: '0.4rem' }}>Hours</p>
+                  <div style={{ display: 'grid', gap: '0.35rem' }}>
+                    {DAYS.map((dayName, idx) => {
+                      const dayHours = draft.hours[String(idx)] as DayHours;
+                      const closed = !dayHours;
+                      return (
+                        <div key={idx} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.85rem' }}>
+                          <span style={{ width: 36, fontWeight: 700, color: '#78350f' }}>{dayName}</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleDayClosed(loc.id, idx)}
+                            style={{ background: closed ? '#fee2e2' : '#dcfce7', color: closed ? '#dc2626' : '#16a34a', border: 'none', borderRadius: 999, padding: '0.15rem 0.6rem', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer', minWidth: 56 }}
+                          >
+                            {closed ? 'Closed' : 'Open'}
+                          </button>
+                          {!closed && (
+                            <>
+                              <input
+                                type="time"
+                                value={(dayHours as { open: string; close: string }).open}
+                                onChange={(e) => setDraftHours(loc.id, idx, 'open', e.target.value)}
+                                style={{ ...S.inp, padding: '0.2rem 0.4rem', fontSize: '0.82rem', width: 96 }}
+                              />
+                              <span style={{ color: '#6b7280' }}>–</span>
+                              <input
+                                type="time"
+                                value={(dayHours as { open: string; close: string }).close}
+                                onChange={(e) => setDraftHours(loc.id, idx, 'close', e.target.value)}
+                                style={{ ...S.inp, padding: '0.2rem 0.4rem', fontSize: '0.82rem', width: 96 }}
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="button" onClick={() => saveLocation(loc.id)} disabled={saving === loc.id} style={{ ...S.primaryBtn, fontSize: '0.85rem' }}>
+                    {saving === loc.id ? 'Saving…' : '💾 Save'}
+                  </button>
+                  <button type="button" onClick={() => setExpandedId(null)} style={{ ...S.outlineBtn, fontSize: '0.85rem' }}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Add new location */}
+      {addingNew ? (
+        <div style={{ ...S.card, background: '#f0fdf4', border: '1px solid #86efac' }}>
+          <p style={{ ...sectionTitle, marginBottom: '0.75rem' }}>New Location</p>
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} style={S.inp} placeholder="Location name *" />
+            <input value={newAddress} onChange={(e) => setNewAddress(e.target.value)} style={S.inp} placeholder="Address" />
+            <input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} style={S.inp} placeholder="Phone" />
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button type="button" onClick={handleAddLocation} style={S.primaryBtn}>Add Location</button>
+              <button type="button" onClick={() => setAddingNew(false)} style={S.outlineBtn}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAddingNew(true)} style={{ ...S.outlineBtn, width: '100%', padding: '0.65rem' }}>
+          + Add Location
+        </button>
+      )}
     </div>
   );
 }

@@ -31,6 +31,8 @@ export type Order = {
   customerName: string;
   phone: string;
   pickupTime: string;
+  locationId?: string;
+  locationName?: string;
   items: OrderItem[];
   total: number;
   status: 'Pending' | 'Accepted' | 'Ready' | 'Completed';
@@ -83,6 +85,8 @@ export const placeOrder = (order: {
   customerName: string;
   phone: string;
   pickupTime: string;
+  locationId?: string;
+  locationName?: string;
   items: OrderItem[];
 }) =>
   fetch(`${BASE}/api/orders`, {
@@ -213,3 +217,52 @@ export const updateSettings = (
     headers: adminHeaders(adminUser),
     body: JSON.stringify(updates),
   }).then((r) => parseResponse<AppSettings>(r));
+
+// ── Location / Hours management ───────────────────────────────────────────────
+
+export type DayHours = { open: string; close: string } | null;
+
+export type StoreLocation = {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  /** keys "0"=Sun … "6"=Sat, value null means closed */
+  hours: Record<string, DayHours>;
+};
+
+export const getLocations = () =>
+  fetch(`${BASE}/api/locations`).then((r) => parseResponse<StoreLocation[]>(r));
+
+export const adminGetLocations = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
+  fetch(`${BASE}/api/admin/locations`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<StoreLocation[]>(r));
+
+export const addLocation = (
+  loc: Omit<StoreLocation, 'id'>,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/locations`, {
+    method: 'POST',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(loc),
+  }).then((r) => parseResponse<StoreLocation>(r));
+
+export const updateLocation = (
+  locId: string,
+  updates: Partial<Omit<StoreLocation, 'id'>>,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/locations/${encodeURIComponent(locId)}`, {
+    method: 'PATCH',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(updates),
+  }).then((r) => parseResponse<StoreLocation>(r));
+
+export const deleteLocation = (
+  locId: string,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/locations/${encodeURIComponent(locId)}`, {
+    method: 'DELETE',
+    headers: adminHeaders(adminUser),
+  }).then((r) => parseResponse<{ ok: boolean }>(r));

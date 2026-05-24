@@ -6,7 +6,9 @@ from flask import Blueprint, jsonify, request
 from ..data import (
     ADMIN_EMAIL,
     BUILTIN_ADMIN_PHONES,
+    add_location,
     add_menu_item,
+    delete_location,
     delete_menu_item,
     get_order,
     is_admin_email,
@@ -15,6 +17,7 @@ from ..data import (
     list_orders,
     list_users,
     load_admins,
+    load_locations,
     load_menu,
     load_settings,
     read_data_file,
@@ -22,6 +25,7 @@ from ..data import (
     save_order,
     save_settings,
     suggested_prep_minutes,
+    update_location,
     update_menu_item,
     update_order,
 )
@@ -63,8 +67,12 @@ def login():
     return jsonify(resp)
 
 
-@bp.get('/menu')
-def get_menu():
+@bp.get('/locations')
+def get_locations():
+    return jsonify(load_locations())
+
+
+
     return jsonify(load_menu())
 
 
@@ -92,6 +100,8 @@ def create_order():
     phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
     pickup_time = str(payload.get('pickupTime', '')).strip()
     items = payload.get('items') or []
+    location_id = str(payload.get('locationId', '')).strip()
+    location_name = str(payload.get('locationName', '')).strip()
 
     if not customer_name or not phone or not pickup_time:
         return jsonify({'error': 'Customer name, phone, and pickup time are required.'}), 400
@@ -128,6 +138,8 @@ def create_order():
         'customerName': customer_name,
         'phone': phone,
         'pickupTime': pickup_time,
+        'locationId': location_id,
+        'locationName': location_name,
         'items': normalized_items,
         'total': round(total, 2),
         'status': 'Pending',
@@ -371,3 +383,56 @@ def admin_patch_settings():
             return jsonify({'error': 'goatPrepMinutes must be a positive integer.'}), 400
     save_settings(settings)
     return jsonify(settings)
+
+
+# ── Location management routes ────────────────────────────────────────────────
+
+@bp.get('/admin/locations')
+def admin_get_locations():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    return jsonify(load_locations())
+
+
+@bp.post('/admin/locations')
+def admin_add_location():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name', '')).strip()
+    if not name:
+        return jsonify({'error': 'name is required.'}), 400
+    loc = add_location({
+        'name': name,
+        'address': str(payload.get('address', '')).strip(),
+        'phone': str(payload.get('phone', '')).strip(),
+        'hours': payload.get('hours'),
+    })
+    return jsonify(loc), 201
+
+
+@bp.patch('/admin/locations/<loc_id>')
+def admin_patch_location(loc_id: str):
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    updates: dict = {}
+    for field in ('name', 'address', 'phone', 'hours'):
+        if field in payload:
+            updates[field] = payload[field]
+    if not updates:
+        return jsonify({'error': 'No valid fields provided.'}), 400
+    loc = update_location(loc_id, updates)
+    if loc is None:
+        return jsonify({'error': 'Location not found.'}), 404
+    return jsonify(loc)
+
+
+@bp.delete('/admin/locations/<loc_id>')
+def admin_delete_location(loc_id: str):
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    deleted = delete_location(loc_id)
+    if not deleted:
+        return jsonify({'error': 'Location not found.'}), 404
+    return jsonify({'ok': True})

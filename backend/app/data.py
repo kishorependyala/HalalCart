@@ -261,6 +261,100 @@ def add_menu_item(item: dict[str, Any]) -> dict[str, Any]:
     return new_item
 
 
+# ── Location / Hours management ──────────────────────────────────────────────
+
+# Hours: dict keyed by weekday string "0"=Sun … "6"=Sat.
+# Each value: {"open": "10:00", "close": "20:00"} or null for closed.
+DEFAULT_LOCATIONS: list[dict] = [
+    {
+        'id': 'loc1',
+        'name': 'Monroe Township',
+        'address': '355 Applegarth Rd, Monroe Township, NJ 08831',
+        'phone': '(609) 235-9158',
+        'hours': {
+            '0': {'open': '10:00', 'close': '18:00'},
+            '1': {'open': '10:00', 'close': '20:00'},
+            '2': {'open': '10:00', 'close': '20:00'},
+            '3': {'open': '10:00', 'close': '20:00'},
+            '4': {'open': '10:00', 'close': '20:00'},
+            '5': {'open': '10:00', 'close': '20:00'},
+            '6': {'open': '10:00', 'close': '20:00'},
+        },
+    },
+    {
+        'id': 'loc2',
+        'name': 'Location 2',
+        'address': 'Address TBD — update in Admin',
+        'phone': '',
+        'hours': {
+            '0': {'open': '10:00', 'close': '18:00'},
+            '1': {'open': '10:00', 'close': '20:00'},
+            '2': {'open': '10:00', 'close': '20:00'},
+            '3': {'open': '10:00', 'close': '20:00'},
+            '4': {'open': '10:00', 'close': '20:00'},
+            '5': {'open': '10:00', 'close': '20:00'},
+            '6': {'open': '10:00', 'close': '20:00'},
+        },
+    },
+]
+
+
+def get_locations_path() -> Path:
+    return get_data_dir() / 'locations.json'
+
+
+def load_locations() -> list[dict[str, Any]]:
+    path = get_locations_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return [loc.copy() for loc in DEFAULT_LOCATIONS]
+
+
+def save_locations(locations: list[dict[str, Any]]) -> None:
+    path = get_locations_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(locations, indent=2), encoding='utf-8')
+
+
+def add_location(loc: dict[str, Any]) -> dict[str, Any]:
+    from uuid import uuid4
+    locations = load_locations()
+    new_loc: dict[str, Any] = {
+        'id': 'loc' + str(uuid4())[:6],
+        'name': loc.get('name', 'New Location'),
+        'address': loc.get('address', ''),
+        'phone': loc.get('phone', ''),
+        'hours': loc.get('hours', DEFAULT_LOCATIONS[0]['hours'].copy()),
+    }
+    locations.append(new_loc)
+    save_locations(locations)
+    return new_loc
+
+
+def update_location(loc_id: str, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+    locations = load_locations()
+    for loc in locations:
+        if loc['id'] == loc_id:
+            for key in ('name', 'address', 'phone', 'hours'):
+                if key in updates:
+                    loc[key] = updates[key]
+            save_locations(locations)
+            return loc
+    return None
+
+
+def delete_location(loc_id: str) -> bool:
+    locations = load_locations()
+    new_locs = [loc for loc in locations if loc['id'] != loc_id]
+    if len(new_locs) == len(locations):
+        return False
+    save_locations(new_locs)
+    return True
+
+
 # ── Settings management ───────────────────────────────────────────────────────
 
 DEFAULT_SETTINGS: dict[str, Any] = {
