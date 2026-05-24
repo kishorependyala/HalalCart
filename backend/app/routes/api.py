@@ -72,7 +72,8 @@ def get_locations():
     return jsonify(load_locations())
 
 
-
+@bp.get('/menu')
+def get_menu():
     return jsonify(load_menu())
 
 
