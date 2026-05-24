@@ -147,3 +147,39 @@ export const readDataFile = (
   fetch(`${BASE}/api/admin/data/file?path=${encodeURIComponent(path)}`, { headers: adminHeaders(adminUser) }).then(
     (r) => parseResponse<{ path: string; content: string }>(r)
   );
+
+// ── Menu management ───────────────────────────────────────────────────────────
+
+export const adminGetMenu = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
+  fetch(`${BASE}/api/admin/menu`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<MenuItem[]>(r));
+
+export const updateMenuItem = (
+  itemId: string,
+  updates: Partial<Pick<MenuItem, 'name' | 'price' | 'unit' | 'description' | 'category'>>,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/menu/${encodeURIComponent(itemId)}`, {
+    method: 'PATCH',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(updates),
+  }).then((r) => parseResponse<MenuItem>(r));
+
+// ── Settings management ───────────────────────────────────────────────────────
+
+export type AppSettings = {
+  chickenPrepMinutes: number;
+  goatPrepMinutes: number;
+};
+
+export const getSettings = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
+  fetch(`${BASE}/api/admin/settings`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<AppSettings>(r));
+
+export const updateSettings = (
+  updates: Partial<AppSettings>,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/settings`, {
+    method: 'PATCH',
+    headers: adminHeaders(adminUser),
+    body: JSON.stringify(updates),
+  }).then((r) => parseResponse<AppSettings>(r));

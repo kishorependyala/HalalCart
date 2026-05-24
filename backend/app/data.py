@@ -14,6 +14,18 @@ ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', '').strip().lower()
 CHICKEN_PREP_MINUTES = 20
 DEFAULT_GOAT_PREP_MINUTES = 45
 
+DEFAULT_MENU: list[dict] = [
+    {'id': 'g3', 'category': 'Goat',    'name': 'Goat Leg',            'price': 35.00, 'unit': 'per leg', 'description': 'Bone-in goat leg, great for biryani'},
+    {'id': 'g4', 'category': 'Goat',    'name': 'Goat Shoulder',       'price': 28.00, 'unit': 'per lb',  'description': 'Tender goat shoulder, perfect for curry'},
+    {'id': 'g5', 'category': 'Goat',    'name': 'Goat Chops',          'price': 22.00, 'unit': 'per lb',  'description': 'Goat rib chops, halal certified'},
+    {'id': 'g6', 'category': 'Goat',    'name': 'Goat Keema',          'price': 18.00, 'unit': 'per lb',  'description': 'Fresh ground goat meat'},
+    {'id': 'c1', 'category': 'Chicken', 'name': 'Whole Chicken',       'price': 12.00, 'unit': 'per bird','description': 'Fresh whole chicken, halal slaughtered'},
+    {'id': 'c2', 'category': 'Chicken', 'name': 'Chicken Leg Quarters','price':  3.50, 'unit': 'per lb',  'description': 'Juicy leg quarters, skin-on'},
+    {'id': 'c3', 'category': 'Chicken', 'name': 'Boneless Breast',     'price':  5.99, 'unit': 'per lb',  'description': 'Skinless boneless chicken breast'},
+    {'id': 'c4', 'category': 'Chicken', 'name': 'Chicken Wings',       'price':  4.50, 'unit': 'per lb',  'description': 'Fresh chicken wings'},
+    {'id': 'c5', 'category': 'Chicken', 'name': 'Chicken Keema',       'price':  4.99, 'unit': 'per lb',  'description': 'Ground chicken, great for kebabs'},
+]
+
 
 def get_data_dir() -> Path:
     configured = os.getenv('DATA_DIR')
@@ -73,7 +85,7 @@ def avg_goat_prep_minutes() -> int:
                         diffs.append(diff)
                 except (ValueError, TypeError):
                     pass
-    return round(sum(diffs) / len(diffs)) if diffs else DEFAULT_GOAT_PREP_MINUTES
+    return round(sum(diffs) / len(diffs)) if diffs else load_settings().get('goatPrepMinutes', DEFAULT_GOAT_PREP_MINUTES)
 
 
 # ── Admin management ────────────────────────────────────────────────────────
@@ -147,11 +159,79 @@ def read_data_file(rel_path: str) -> Optional[str]:
 
 def suggested_prep_minutes(items: list[dict[str, Any]]) -> int:
     """Calculate suggested prep time based on item categories."""
+    settings = load_settings()
     has_goat = any(item.get('id', '').startswith('g') for item in items)
     has_chicken = any(item.get('id', '').startswith('c') for item in items)
     times = []
     if has_chicken:
-        times.append(CHICKEN_PREP_MINUTES)
+        times.append(settings['chickenPrepMinutes'])
     if has_goat:
         times.append(avg_goat_prep_minutes())
-    return max(times) if times else CHICKEN_PREP_MINUTES
+    return max(times) if times else settings['chickenPrepMinutes']
+
+
+# ── Menu management ──────────────────────────────────────────────────────────
+
+def get_menu_path() -> Path:
+    return get_data_dir() / 'menu.json'
+
+
+def load_menu() -> list[dict[str, Any]]:
+    """Load menu from file, falling back to DEFAULT_MENU."""
+    path = get_menu_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return [item.copy() for item in DEFAULT_MENU]
+
+
+def save_menu(menu: list[dict[str, Any]]) -> None:
+    path = get_menu_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(menu, indent=2), encoding='utf-8')
+
+
+def update_menu_item(item_id: str, updates: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Update a single menu item by id. Returns the updated item or None if not found."""
+    menu = load_menu()
+    for item in menu:
+        if item['id'] == item_id:
+            allowed = {'name', 'price', 'unit', 'description', 'category'}
+            for key, val in updates.items():
+                if key in allowed:
+                    item[key] = val
+            save_menu(menu)
+            return item
+    return None
+
+
+# ── Settings management ───────────────────────────────────────────────────────
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    'chickenPrepMinutes': CHICKEN_PREP_MINUTES,
+    'goatPrepMinutes': DEFAULT_GOAT_PREP_MINUTES,
+}
+
+
+def get_settings_path() -> Path:
+    return get_data_dir() / 'settings.json'
+
+
+def load_settings() -> dict[str, Any]:
+    """Load app settings from file, merging with defaults."""
+    path = get_settings_path()
+    if path.exists():
+        try:
+            stored = json.loads(path.read_text(encoding='utf-8'))
+            return {**DEFAULT_SETTINGS, **stored}
+        except Exception:
+            pass
+    return DEFAULT_SETTINGS.copy()
+
+
+def save_settings(settings: dict[str, Any]) -> None:
+    path = get_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, indent=2), encoding='utf-8')

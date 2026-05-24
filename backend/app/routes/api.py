@@ -12,26 +12,18 @@ from ..data import (
     list_data_files,
     list_orders,
     load_admins,
+    load_menu,
+    load_settings,
     read_data_file,
     save_admins,
     save_order,
+    save_settings,
     suggested_prep_minutes,
+    update_menu_item,
     update_order,
 )
 
 bp = Blueprint('api', __name__)
-
-MENU = [
-    {'id': 'g3', 'category': 'Goat', 'name': 'Goat Leg', 'price': 35.00, 'unit': 'per leg', 'description': 'Bone-in goat leg, great for biryani'},
-    {'id': 'g4', 'category': 'Goat', 'name': 'Goat Shoulder', 'price': 28.00, 'unit': 'per lb', 'description': 'Tender goat shoulder, perfect for curry'},
-    {'id': 'g5', 'category': 'Goat', 'name': 'Goat Chops', 'price': 22.00, 'unit': 'per lb', 'description': 'Goat rib chops, halal certified'},
-    {'id': 'g6', 'category': 'Goat', 'name': 'Goat Keema', 'price': 18.00, 'unit': 'per lb', 'description': 'Fresh ground goat meat'},
-    {'id': 'c1', 'category': 'Chicken', 'name': 'Whole Chicken', 'price': 12.00, 'unit': 'per bird', 'description': 'Fresh whole chicken, halal slaughtered'},
-    {'id': 'c2', 'category': 'Chicken', 'name': 'Chicken Leg Quarters', 'price': 3.50, 'unit': 'per lb', 'description': 'Juicy leg quarters, skin-on'},
-    {'id': 'c3', 'category': 'Chicken', 'name': 'Boneless Breast', 'price': 5.99, 'unit': 'per lb', 'description': 'Skinless boneless chicken breast'},
-    {'id': 'c4', 'category': 'Chicken', 'name': 'Chicken Wings', 'price': 4.50, 'unit': 'per lb', 'description': 'Fresh chicken wings'},
-    {'id': 'c5', 'category': 'Chicken', 'name': 'Chicken Keema', 'price': 4.99, 'unit': 'per lb', 'description': 'Ground chicken, great for kebabs'},
-]
 
 VALID_STATUSES = {'Pending', 'Accepted', 'Ready', 'Completed'}
 
@@ -70,7 +62,7 @@ def login():
 
 @bp.get('/menu')
 def get_menu():
-    return jsonify(MENU)
+    return jsonify(load_menu())
 
 
 @bp.get('/orders')
@@ -255,3 +247,80 @@ def read_data():
     if content is None:
         return jsonify({'error': 'File not found or not readable.'}), 404
     return jsonify({'path': rel_path, 'content': content})
+
+
+# ── Menu management routes ───────────────────────────────────────────────────
+
+@bp.get('/admin/menu')
+def admin_get_menu():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    return jsonify(load_menu())
+
+
+@bp.patch('/admin/menu/<item_id>')
+def admin_patch_menu_item(item_id: str):
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    updates: dict = {}
+    if 'name' in payload:
+        name = str(payload['name']).strip()
+        if not name:
+            return jsonify({'error': 'name cannot be empty.'}), 400
+        updates['name'] = name
+    if 'price' in payload:
+        try:
+            price = float(payload['price'])
+            if price < 0:
+                raise ValueError
+            updates['price'] = round(price, 2)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'price must be a non-negative number.'}), 400
+    if 'unit' in payload:
+        updates['unit'] = str(payload['unit']).strip()
+    if 'description' in payload:
+        updates['description'] = str(payload['description']).strip()
+    if 'category' in payload:
+        updates['category'] = str(payload['category']).strip()
+    if not updates:
+        return jsonify({'error': 'No valid fields provided.'}), 400
+    item = update_menu_item(item_id, updates)
+    if item is None:
+        return jsonify({'error': 'Menu item not found.'}), 404
+    return jsonify(item)
+
+
+# ── Settings routes ──────────────────────────────────────────────────────────
+
+@bp.get('/admin/settings')
+def admin_get_settings():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    return jsonify(load_settings())
+
+
+@bp.patch('/admin/settings')
+def admin_patch_settings():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    settings = load_settings()
+    if 'chickenPrepMinutes' in payload:
+        try:
+            val = int(payload['chickenPrepMinutes'])
+            if val < 1:
+                raise ValueError
+            settings['chickenPrepMinutes'] = val
+        except (TypeError, ValueError):
+            return jsonify({'error': 'chickenPrepMinutes must be a positive integer.'}), 400
+    if 'goatPrepMinutes' in payload:
+        try:
+            val = int(payload['goatPrepMinutes'])
+            if val < 1:
+                raise ValueError
+            settings['goatPrepMinutes'] = val
+        except (TypeError, ValueError):
+            return jsonify({'error': 'goatPrepMinutes must be a positive integer.'}), 400
+    save_settings(settings)
+    return jsonify(settings)

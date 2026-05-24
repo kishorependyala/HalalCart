@@ -2,20 +2,26 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   AdminsData,
+  AppSettings,
   DataFileEntry,
+  MenuItem,
   addAdmin,
+  adminGetMenu,
   getAdmins,
   getOrders,
+  getSettings,
   listDataFiles,
   Order,
   readDataFile,
   removeAdmin,
+  updateMenuItem,
   updateOrder,
+  updateSettings,
   User,
 } from '../api';
 import { S, mutedText, sectionTitle } from '../theme';
 
-type AdminSubTab = 'orders' | 'data' | 'admins';
+type AdminSubTab = 'orders' | 'menu' | 'data' | 'admins';
 
 type Props = {
   adminUser: User;
@@ -45,6 +51,7 @@ export default function AdminTab({ adminUser }: Props) {
 
   const subTabs: Array<{ id: AdminSubTab; label: string; emoji: string }> = [
     { id: 'orders', label: 'Orders', emoji: '📋' },
+    { id: 'menu',   label: 'Menu',   emoji: '🍖' },
     { id: 'data',   label: 'Data',   emoji: '📁' },
     { id: 'admins', label: 'Admins', emoji: '🛡️' },
   ];
@@ -79,6 +86,7 @@ export default function AdminTab({ adminUser }: Props) {
       </section>
 
       {subTab === 'orders' && <OrdersPanel adminUser={adminUser} />}
+      {subTab === 'menu'   && <MenuPanel   adminUser={adminUser} />}
       {subTab === 'data'   && <DataPanel   adminUser={adminUser} />}
       {subTab === 'admins' && <AdminsPanel adminUser={adminUser} />}
     </div>
@@ -257,6 +265,173 @@ function OrderCard({ order, isBusy, prepEdit, onPrepEditChange, onSavePrepTime, 
 
       <div style={{ marginTop: '0.5rem', color: '#92400e', fontWeight: 700, fontSize: '0.9rem' }}>
         Total: ${order.total.toFixed(2)}
+      </div>
+    </div>
+  );
+}
+
+// ── Menu Management Panel ─────────────────────────────────────────────────────
+
+function MenuPanel({ adminUser }: { adminUser: User }) {
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Partial<MenuItem>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [settingsDraft, setSettingsDraft] = useState<Partial<AppSettings>>({});
+  const [settingsBusy, setSettingsBusy] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    Promise.all([adminGetMenu(adminUser), getSettings(adminUser)])
+      .then(([menuData, settingsData]) => {
+        setMenu(menuData);
+        setSettings(settingsData);
+        setSettingsDraft({ chickenPrepMinutes: settingsData.chickenPrepMinutes, goatPrepMinutes: settingsData.goatPrepMinutes });
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load menu.'))
+      .finally(() => setLoading(false));
+  }, [adminUser]);
+
+  const startEdit = (item: MenuItem) => {
+    setEditingId(item.id);
+    setDraft({ name: item.name, price: item.price, unit: item.unit, description: item.description });
+    setMsg('');
+  };
+
+  const cancelEdit = () => { setEditingId(null); setDraft({}); };
+
+  const saveItem = async (itemId: string) => {
+    setBusy(true); setMsg('');
+    try {
+      const updated = await updateMenuItem(itemId, draft, adminUser);
+      setMenu((m) => m.map((i) => (i.id === itemId ? updated : i)));
+      setEditingId(null);
+      setDraft({});
+      setMsg('Item saved.');
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Save failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsBusy(true); setMsg('');
+    try {
+      const updated = await updateSettings(settingsDraft, adminUser);
+      setSettings(updated);
+      setSettingsDraft({ chickenPrepMinutes: updated.chickenPrepMinutes, goatPrepMinutes: updated.goatPrepMinutes });
+      setMsg('Settings saved.');
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : 'Failed to save settings.');
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  if (loading) return <div style={S.card}>Loading menu…</div>;
+  if (error)   return <div style={{ ...S.card, ...S.errorBox }}>{error}</div>;
+
+  const categories = Array.from(new Set(menu.map((i) => i.category)));
+
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      {msg && (
+        <div style={{ ...S.card, ...(msg.toLowerCase().includes('fail') || msg.toLowerCase().includes('error') ? S.errorBox : S.successBox) }}>
+          {msg}
+        </div>
+      )}
+
+      {/* Menu items by category */}
+      {categories.map((cat) => (
+        <div key={cat} style={S.card}>
+          <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>
+            {cat === 'Goat' ? '🐐' : cat === 'Chicken' ? '🍗' : '🍟'} {cat}
+          </h3>
+          <div style={{ display: 'grid', gap: '0.75rem' }}>
+            {menu.filter((i) => i.category === cat).map((item) => (
+              <div key={item.id} style={{ border: '1px solid #fde68a', borderRadius: '0.7rem', padding: '0.75rem', background: '#fffbeb' }}>
+                {editingId === item.id ? (
+                  <div style={{ display: 'grid', gap: '0.55rem' }}>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '2 1 160px' }}>
+                        <label style={S.label}>Name</label>
+                        <input style={S.inp} value={draft.name ?? ''} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
+                      </div>
+                      <div style={{ flex: '1 1 90px' }}>
+                        <label style={S.label}>Price ($)</label>
+                        <input style={S.inp} type="number" min={0} step={0.01} value={draft.price ?? ''} onChange={(e) => setDraft((d) => ({ ...d, price: parseFloat(e.target.value) || 0 }))} />
+                      </div>
+                      <div style={{ flex: '1 1 100px' }}>
+                        <label style={S.label}>Unit</label>
+                        <input style={S.inp} value={draft.unit ?? ''} onChange={(e) => setDraft((d) => ({ ...d, unit: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={S.label}>Description</label>
+                      <input style={S.inp} value={draft.description ?? ''} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button type="button" onClick={() => saveItem(item.id)} disabled={busy} style={{ ...S.primaryBtn, opacity: busy ? 0.6 : 1 }}>
+                        {busy ? 'Saving…' : '💾 Save'}
+                      </button>
+                      <button type="button" onClick={cancelEdit} disabled={busy} style={S.outlineBtn}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#78350f' }}>{item.name}</div>
+                      <div style={{ ...mutedText, marginTop: '0.15rem' }}>{item.description}</div>
+                      <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.75rem', fontSize: '0.88rem', flexWrap: 'wrap' }}>
+                        <span style={{ color: '#16a34a', fontWeight: 700 }}>${item.price.toFixed(2)}</span>
+                        <span style={{ color: '#6b7280' }}>{item.unit}</span>
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => startEdit(item)} style={{ ...S.outlineBtn, fontSize: '0.82rem', padding: '0.3rem 0.75rem', whiteSpace: 'nowrap' }}>
+                      ✏️ Edit
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {/* Default prep times */}
+      <div style={S.card}>
+        <h3 style={{ margin: '0 0 0.75rem', color: '#78350f', fontSize: '0.95rem', fontWeight: 800 }}>⏱️ Default Prep Times</h3>
+        <p style={{ ...mutedText, marginBottom: '0.75rem' }}>Used when estimating prep time for new orders.</p>
+        <form onSubmit={saveSettings} style={{ display: 'grid', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 140px' }}>
+              <label style={S.label}>🍗 Chicken (minutes)</label>
+              <input
+                type="number" min={1} style={S.inp}
+                value={settingsDraft.chickenPrepMinutes ?? ''}
+                onChange={(e) => setSettingsDraft((s) => ({ ...s, chickenPrepMinutes: parseInt(e.target.value, 10) || 0 }))}
+              />
+            </div>
+            <div style={{ flex: '1 1 140px' }}>
+              <label style={S.label}>🐐 Goat (minutes)</label>
+              <input
+                type="number" min={1} style={S.inp}
+                value={settingsDraft.goatPrepMinutes ?? ''}
+                onChange={(e) => setSettingsDraft((s) => ({ ...s, goatPrepMinutes: parseInt(e.target.value, 10) || 0 }))}
+              />
+            </div>
+          </div>
+          <button type="submit" disabled={settingsBusy} style={{ ...S.primaryBtn, opacity: settingsBusy ? 0.6 : 1, justifySelf: 'start' }}>
+            {settingsBusy ? 'Saving…' : '💾 Save Prep Times'}
+          </button>
+        </form>
       </div>
     </div>
   );
