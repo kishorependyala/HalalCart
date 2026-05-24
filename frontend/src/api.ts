@@ -104,6 +104,17 @@ export const updateOrder = (
 
 // ── Admin management ─────────────────────────────────────────────────────────
 
+export type AdminUser = {
+  name: string;
+  phone: string;
+  orderCount: number;
+  lastOrderAt: string;
+  totalSpent: number;
+};
+
+export const getAdminUsers = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
+  fetch(`${BASE}/api/admin/users`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<AdminUser[]>(r));
+
 export type AdminsData = {
   builtinPhones: string[];
   phones: string[];

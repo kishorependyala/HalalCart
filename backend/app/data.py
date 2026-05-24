@@ -46,6 +46,30 @@ def list_orders() -> list[dict[str, Any]]:
     return sorted(orders, key=lambda order: order.get('createdAt', ''), reverse=True)
 
 
+def list_users() -> list[dict[str, Any]]:
+    """Aggregate unique users from all orders, sorted by most recent order."""
+    seen: dict[str, dict[str, Any]] = {}
+    for order in list_orders():
+        phone = order.get('phone', '')
+        if not phone:
+            continue
+        if phone not in seen:
+            seen[phone] = {
+                'name': order.get('customerName', ''),
+                'phone': phone,
+                'orderCount': 0,
+                'lastOrderAt': '',
+                'totalSpent': 0.0,
+            }
+        seen[phone]['orderCount'] += 1
+        seen[phone]['totalSpent'] = round(seen[phone]['totalSpent'] + order.get('total', 0.0), 2)
+        created = order.get('createdAt', '')
+        if created > seen[phone]['lastOrderAt']:
+            seen[phone]['lastOrderAt'] = created
+            seen[phone]['name'] = order.get('customerName', seen[phone]['name'])
+    return sorted(seen.values(), key=lambda u: u['lastOrderAt'], reverse=True)
+
+
 def get_order(order_id: str) -> Optional[dict[str, Any]]:
     file_path = get_orders_dir() / f'{order_id}.json'
     if not file_path.exists():

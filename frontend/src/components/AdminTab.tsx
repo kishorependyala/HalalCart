@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import {
   AdminsData,
+  AdminUser,
   AppSettings,
   DataFileEntry,
   MenuItem,
@@ -9,6 +10,7 @@ import {
   addMenuItem,
   adminGetMenu,
   deleteMenuItem,
+  getAdminUsers,
   getAdmins,
   getOrders,
   getSettings,
@@ -23,7 +25,7 @@ import {
 } from '../api';
 import { S, mutedText, sectionTitle } from '../theme';
 
-type AdminSubTab = 'orders' | 'menu' | 'data' | 'admins';
+type AdminSubTab = 'orders' | 'users' | 'menu' | 'data' | 'admins';
 
 type Props = {
   adminUser: User;
@@ -53,6 +55,7 @@ export default function AdminTab({ adminUser }: Props) {
 
   const subTabs: Array<{ id: AdminSubTab; label: string; emoji: string }> = [
     { id: 'orders', label: 'Orders', emoji: '📋' },
+    { id: 'users',  label: 'Users',  emoji: '👥' },
     { id: 'menu',   label: 'Menu',   emoji: '🍖' },
     { id: 'data',   label: 'Data',   emoji: '📁' },
     { id: 'admins', label: 'Admins', emoji: '🛡️' },
@@ -88,9 +91,109 @@ export default function AdminTab({ adminUser }: Props) {
       </section>
 
       {subTab === 'orders' && <OrdersPanel adminUser={adminUser} />}
+      {subTab === 'users'  && <UsersPanel  adminUser={adminUser} />}
       {subTab === 'menu'   && <MenuPanel   adminUser={adminUser} />}
       {subTab === 'data'   && <DataPanel   adminUser={adminUser} />}
       {subTab === 'admins' && <AdminsPanel adminUser={adminUser} />}
+    </div>
+  );
+}
+
+// ── Users Panel ──────────────────────────────────────────────────────────────
+
+function UsersPanel({ adminUser }: { adminUser: User }) {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [expandedPhone, setExpandedPhone] = useState<string | null>(null);
+  const [userOrders, setUserOrders] = useState<Record<string, Order[]>>({});
+  const [ordersLoading, setOrdersLoading] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setLoading(true); setError('');
+    getAdminUsers(adminUser)
+      .then(setUsers)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load users.'))
+      .finally(() => setLoading(false));
+  }, [adminUser]);
+
+  const toggleUser = async (phone: string) => {
+    if (expandedPhone === phone) { setExpandedPhone(null); return; }
+    setExpandedPhone(phone);
+    if (userOrders[phone]) return;
+    setOrdersLoading((o) => ({ ...o, [phone]: true }));
+    try {
+      const orders = await getOrders(phone);
+      setUserOrders((o) => ({ ...o, [phone]: orders }));
+    } catch { setUserOrders((o) => ({ ...o, [phone]: [] })); }
+    finally { setOrdersLoading((o) => ({ ...o, [phone]: false })); }
+  };
+
+  const fmtDate = (iso: string) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+    catch { return iso.slice(0, 10); }
+  };
+
+  if (loading) return <div style={S.card}>Loading users…</div>;
+  if (error)   return <div style={{ ...S.card, ...S.errorBox }}>{error}</div>;
+  if (!users.length) return <div style={{ ...S.card, background: '#fffaf0' }}>No users yet.</div>;
+
+  return (
+    <div style={{ display: 'grid', gap: '0.5rem' }}>
+      <p style={mutedText}>{users.length} customer{users.length !== 1 ? 's' : ''} found.</p>
+
+      {/* Header */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px 56px 88px 20px', gap: '0.5rem', padding: '0.4rem 0.75rem', background: '#fef3c7', borderRadius: '0.5rem', fontSize: '0.73rem', fontWeight: 800, color: '#92400e', textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>
+        <span>Name</span><span>Phone</span><span style={{ textAlign: 'center' as const }}>Orders</span><span style={{ textAlign: 'right' as const }}>Spent</span><span />
+      </div>
+
+      {users.map((u) => (
+        <div key={u.phone} style={{ border: '1px solid #fed7aa', borderRadius: '0.75rem', background: '#fffbeb', overflow: 'hidden' }}>
+          <button
+            type="button"
+            onClick={() => toggleUser(u.phone)}
+            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '0.6rem 0.75rem', display: 'grid', gridTemplateColumns: '1fr 130px 56px 88px 20px', gap: '0.5rem', alignItems: 'center', textAlign: 'left' as const }}
+          >
+            <span style={{ fontWeight: 700, color: '#78350f', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{u.name}</span>
+            <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', color: '#374151' }}>{u.phone}</span>
+            <span style={{ textAlign: 'center' as const, fontSize: '0.82rem', color: '#6b7280' }}>{u.orderCount}</span>
+            <span style={{ textAlign: 'right' as const, fontSize: '0.82rem', fontWeight: 700, color: '#16a34a' }}>${u.totalSpent.toFixed(2)}</span>
+            <span style={{ color: '#9ca3af', fontSize: '0.7rem' }}>{expandedPhone === u.phone ? '▲' : '▼'}</span>
+          </button>
+
+          {expandedPhone === u.phone && (
+            <div style={{ borderTop: '1px solid #fde68a', padding: '0.6rem 0.75rem', background: '#fffef5' }}>
+              <p style={{ ...mutedText, fontSize: '0.75rem', marginBottom: '0.5rem', marginTop: 0 }}>Last order: {fmtDate(u.lastOrderAt)}</p>
+              {ordersLoading[u.phone] ? (
+                <span style={mutedText}>Loading orders…</span>
+              ) : !userOrders[u.phone]?.length ? (
+                <span style={mutedText}>No orders found.</span>
+              ) : (
+                <div style={{ display: 'grid', gap: '0.4rem' }}>
+                  {userOrders[u.phone].map((order) => (
+                    <div key={order.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.6rem', background: '#fff', border: '1px solid #fde68a', borderRadius: '0.5rem', flexWrap: 'wrap' as const }}>
+                      <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' as const }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: '#78350f', fontWeight: 700 }}>#{order.id.slice(-6).toUpperCase()}</span>
+                        <span style={{ fontSize: '0.78rem', color: '#6b7280' }}>{fmtDate(order.createdAt)}</span>
+                        <span style={{ fontSize: '0.78rem', color: '#374151' }}>{order.items.map((i) => `${i.name} ×${i.qty}`).join(', ')}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexShrink: 0 }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#16a34a' }}>${order.total.toFixed(2)}</span>
+                        <span style={{
+                          background: order.status === 'Completed' ? '#e5e7eb' : order.status === 'Ready' ? '#dcfce7' : order.status === 'Accepted' ? '#dbeafe' : '#fef3c7',
+                          color: order.status === 'Completed' ? '#374151' : order.status === 'Ready' ? '#166534' : order.status === 'Accepted' ? '#1e40af' : '#92400e',
+                          borderRadius: 999, padding: '0.15rem 0.5rem', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase' as const,
+                        }}>{order.status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

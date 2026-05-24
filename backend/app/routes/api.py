@@ -13,6 +13,7 @@ from ..data import (
     is_admin_phone,
     list_data_files,
     list_orders,
+    list_users,
     load_admins,
     load_menu,
     load_settings,
@@ -249,6 +250,15 @@ def read_data():
     if content is None:
         return jsonify({'error': 'File not found or not readable.'}), 404
     return jsonify({'path': rel_path, 'content': content})
+
+
+# ── Users route ──────────────────────────────────────────────────────────────
+
+@bp.get('/admin/users')
+def admin_get_users():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    return jsonify(list_users())
 
 
 # ── Menu management routes ───────────────────────────────────────────────────
