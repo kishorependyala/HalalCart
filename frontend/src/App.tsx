@@ -41,6 +41,7 @@ function App() {
   const [user, setUser] = useState<User | null>(loadStoredUser);
   const [showLogin, setShowLogin] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [viewAsUser, setViewAsUser] = useState<User | null>(null);
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.qty, 0), [cartItems]);
   const cartTotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
@@ -120,23 +121,37 @@ function App() {
     setCartItems((current) => current.filter((item) => item.id !== itemId));
   };
 
+  const handleViewAsUser = (u: User) => {
+    setViewAsUser(u);
+    setOrders([]);
+    setActiveTab('orders');
+  };
+
+  const handleExitViewAs = () => {
+    setViewAsUser(null);
+    setOrders([]);
+    setActiveTab('admin');
+  };
+
   const refreshOrders = useCallback(async () => {
-    if (!user) return;
+    const effectiveUser = viewAsUser ?? user;
+    if (!effectiveUser) return;
     setOrdersLoading(true);
     setOrdersError('');
     try {
-      const nextOrders = await getOrders(user.phone);
+      const nextOrders = await getOrders(effectiveUser.phone);
       setOrders(nextOrders);
     } catch (err) {
       setOrdersError(err instanceof Error ? err.message : 'Unable to load orders.');
     } finally {
       setOrdersLoading(false);
     }
-  }, [user]);
+  }, [user, viewAsUser]);
 
   useEffect(() => {
-    if (user && !user.isAdmin) refreshOrders();
-  }, [user, refreshOrders]);
+    const effectiveUser = viewAsUser ?? user;
+    if (effectiveUser && !effectiveUser.isAdmin) refreshOrders();
+  }, [user, viewAsUser, refreshOrders]);
 
   const handleOrderPlaced = (order: Order) => {
     setCartItems([]);
@@ -217,6 +232,18 @@ function App() {
       </div>
 
       <main style={{ maxWidth: 680, margin: '0 auto', padding: '1rem' }}>
+        {viewAsUser && (
+          <div style={{ background: '#1e40af', color: '#fff', padding: '0.55rem 1rem', borderRadius: '0.75rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.88rem', fontWeight: 700 }}>
+            <span>👁 Viewing as <strong>{viewAsUser.name}</strong> ({viewAsUser.phone})</span>
+            <button
+              type="button"
+              onClick={handleExitViewAs}
+              style={{ background: '#fff', color: '#1e40af', border: 'none', borderRadius: 999, padding: '0.25rem 0.75rem', fontWeight: 800, cursor: 'pointer', fontSize: '0.82rem', whiteSpace: 'nowrap' }}
+            >
+              ← Back to Admin
+            </button>
+          </div>
+        )}
         <section style={S.card}>
           <div style={{ display: 'grid', gap: '0.35rem' }}>
             <div style={{ color: '#78350f', fontSize: '1.15rem', fontWeight: 800 }}>Fresh halal meats</div>
@@ -246,7 +273,7 @@ function App() {
         ) : null}
         {activeTab === 'orders' ? (
           <OrdersTab
-            user={user}
+            user={viewAsUser ?? user}
             orders={orders}
             loading={ordersLoading}
             error={ordersError}
@@ -255,7 +282,7 @@ function App() {
           />
         ) : null}
         {activeTab === 'admin' && user?.isAdmin ? (
-          <AdminTab adminUser={user} />
+          <AdminTab adminUser={user} onViewAsUser={handleViewAsUser} />
         ) : null}
       </main>
 

@@ -29,6 +29,7 @@ type AdminSubTab = 'orders' | 'users' | 'menu' | 'data' | 'admins';
 
 type Props = {
   adminUser: User;
+  onViewAsUser: (u: User) => void;
 };
 
 function statusBadge(status: Order['status']) {
@@ -50,7 +51,7 @@ function statusBadge(status: Order['status']) {
   };
 }
 
-export default function AdminTab({ adminUser }: Props) {
+export default function AdminTab({ adminUser, onViewAsUser }: Props) {
   const [subTab, setSubTab] = useState<AdminSubTab>('orders');
 
   const subTabs: Array<{ id: AdminSubTab; label: string; emoji: string }> = [
@@ -91,7 +92,7 @@ export default function AdminTab({ adminUser }: Props) {
       </section>
 
       {subTab === 'orders' && <OrdersPanel adminUser={adminUser} />}
-      {subTab === 'users'  && <UsersPanel  adminUser={adminUser} />}
+      {subTab === 'users'  && <UsersPanel  adminUser={adminUser} onViewAsUser={onViewAsUser} />}
       {subTab === 'menu'   && <MenuPanel   adminUser={adminUser} />}
       {subTab === 'data'   && <DataPanel   adminUser={adminUser} />}
       {subTab === 'admins' && <AdminsPanel adminUser={adminUser} />}
@@ -101,7 +102,7 @@ export default function AdminTab({ adminUser }: Props) {
 
 // ── Users Panel ──────────────────────────────────────────────────────────────
 
-function UsersPanel({ adminUser }: { adminUser: User }) {
+function UsersPanel({ adminUser, onViewAsUser }: { adminUser: User; onViewAsUser: (u: User) => void }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -161,6 +162,16 @@ function UsersPanel({ adminUser }: { adminUser: User }) {
             <span style={{ textAlign: 'right' as const, fontSize: '0.82rem', fontWeight: 700, color: '#16a34a' }}>${u.totalSpent.toFixed(2)}</span>
             <span style={{ color: '#9ca3af', fontSize: '0.7rem' }}>{expandedPhone === u.phone ? '▲' : '▼'}</span>
           </button>
+
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.75rem', justifyContent: 'flex-end', borderTop: '1px solid #fde68a', background: '#fffef5' }}>
+            <button
+              type="button"
+              onClick={() => onViewAsUser({ name: u.name, phone: u.phone, isAdmin: false })}
+              style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 999, padding: '0.3rem 0.85rem', fontSize: '0.78rem', fontWeight: 700, color: '#92400e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+            >
+              👁 View as this user
+            </button>
+          </div>
 
           {expandedPhone === u.phone && (
             <div style={{ borderTop: '1px solid #fde68a', padding: '0.6rem 0.75rem', background: '#fffef5' }}>
