@@ -18,9 +18,8 @@ type Props = {
   prepMinutes?: number;
 };
 
-/**
- * Round a Date up to the next full hour
- */
+type TimeSlot = { label: string; sublabel: string; value: string };
+
 function roundUpToNextHour(date: Date): Date {
   const result = new Date(date);
   if (result.getMinutes() > 0 || result.getSeconds() > 0) {
@@ -31,127 +30,103 @@ function roundUpToNextHour(date: Date): Date {
   return result;
 }
 
-/** Round a Date up to the nearest N-minute boundary */
 function roundUpMinutes(date: Date, step = 15): Date {
   const ms = step * 60 * 1000;
   return new Date(Math.ceil(date.getTime() / ms) * ms);
 }
 
-/** Format HH:MM string (e.g. "10:00") as local time label */
-function fmtHHMM(hhmm: string): string {
-  const [h, m] = hhmm.split(':').map(Number);
-  const d = new Date();
-  d.setHours(h, m, 0, 0);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-function fmtDateShort(d: Date): string {
+function dayLabel(d: Date): string {
+  const today = new Date();
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-/**
- * Next hourly delivery slot: now + prepMins rounded up to next full hour, within location hours.
- */
-function getNextHourlySlot(loc: StoreLocation, prepMins: number): { date: Date; label: string } | null {
-  const earliest = roundUpToNextHour(new Date(Date.now() + prepMins * 60_000));
+function slotValue(d: Date): string {
+  const dateStr = d.toLocaleDateString('en-CA'); // YYYY-MM-DD
+  const timeStr = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `${dateStr} ${timeStr}`;
+}
 
-  for (let daysAhead = 0; daysAhead < 7; daysAhead++) {
-    const candidate = new Date(earliest);
-    candidate.setDate(earliest.getDate() + daysAhead);
-    if (daysAhead > 0) candidate.setHours(0, 0, 0, 0);
+/** Build next N available quick slots for the given location */
+function buildQuickSlots(loc: StoreLocation, prepMins: number, count = 5): TimeSlot[] {
+  const isHourly = loc.deliveryMode === 'hourly_delivery';
+  const stepMins = isHourly ? 60 : 30;
+  const earliest = isHourly
+    ? roundUpToNextHour(new Date(Date.now() + prepMins * 60_000))
+    : roundUpMinutes(new Date(Date.now() + prepMins * 60_000), 15);
 
-    const dayKey = String(candidate.getDay());
+  const slots: TimeSlot[] = [];
+
+  for (let daysAhead = 0; daysAhead < 14 && slots.length < count; daysAhead++) {
+    const base = new Date(earliest);
+    base.setDate(earliest.getDate() + daysAhead);
+    if (daysAhead > 0) {
+      base.setHours(0, 0, 0, 0);
+    }
+
+    const dayKey = String(base.getDay());
     const dayHours = loc.hours[dayKey];
     if (!dayHours) continue;
 
     const [openH, openM] = (dayHours as { open: string; close: string }).open.split(':').map(Number);
     const [closeH, closeM] = (dayHours as { open: string; close: string }).close.split(':').map(Number);
+    const openTime = new Date(base); openTime.setHours(openH, openM, 0, 0);
+    const closeTime = new Date(base); closeTime.setHours(closeH, closeM, 0, 0);
 
-    const openTime = new Date(candidate); openTime.setHours(openH, openM, 0, 0);
-    const closeTime = new Date(candidate); closeTime.setHours(closeH, closeM, 0, 0);
+    // Start at the earliest valid moment for this day
+    let cursor = daysAhead === 0 ? new Date(base) : new Date(openTime);
+    if (cursor < openTime) cursor = new Date(openTime);
 
-    let slotTime: Date;
-    if (daysAhead === 0) {
-      if (candidate >= closeTime) continue;
-      slotTime = candidate < openTime ? openTime : candidate;
+    // Snap to grid
+    if (isHourly) {
+      if (cursor.getMinutes() !== 0) cursor = roundUpToNextHour(cursor);
     } else {
-      slotTime = openTime;
-    }
-    // Snap to next full hour if not on the hour
-    if (slotTime.getMinutes() !== 0) slotTime = roundUpToNextHour(slotTime);
-    if (slotTime >= closeTime) continue;
-
-    const isToday = slotTime.toDateString() === new Date().toDateString();
-    const dateLabel = isToday ? 'today' : fmtDateShort(slotTime);
-    const timeLabel = slotTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    return { date: slotTime, label: `~${timeLabel} ${dateLabel}` };
-  }
-  return null;
-}
-
-/**
- * Given a location and prep minutes, return the next tentative pickup slot.
- * Returns null if the store has no open days in the next 7 days.
- */
-function getNextPickupSlot(loc: StoreLocation, prepMins: number): { date: Date; label: string } | null {
-  const earliest = roundUpMinutes(new Date(Date.now() + prepMins * 60_000));
-
-  for (let daysAhead = 0; daysAhead < 7; daysAhead++) {
-    const candidate = new Date(earliest);
-    candidate.setDate(earliest.getDate() + daysAhead);
-    if (daysAhead > 0) candidate.setHours(0, 0, 0, 0);
-
-    const dayKey = String(candidate.getDay());
-    const dayHours = loc.hours[dayKey];
-    if (!dayHours) continue; // closed
-
-    const [openH, openM] = (dayHours as { open: string; close: string }).open.split(':').map(Number);
-    const [closeH, closeM] = (dayHours as { open: string; close: string }).close.split(':').map(Number);
-
-    const openTime = new Date(candidate);
-    openTime.setHours(openH, openM, 0, 0);
-    const closeTime = new Date(candidate);
-    closeTime.setHours(closeH, closeM, 0, 0);
-
-    let slotTime: Date;
-    if (daysAhead === 0) {
-      if (candidate >= closeTime) continue; // already past close
-      slotTime = candidate < openTime ? openTime : candidate;
-    } else {
-      slotTime = openTime;
+      cursor = roundUpMinutes(cursor, stepMins);
     }
 
-    const isToday = slotTime.toDateString() === new Date().toDateString();
-    const dateLabel = isToday ? 'today' : fmtDateShort(slotTime);
-    const timeLabel = slotTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    return { date: slotTime, label: `~${timeLabel} ${dateLabel}` };
+    while (cursor < closeTime && slots.length < count) {
+      slots.push({
+        label: cursor.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        sublabel: dayLabel(cursor),
+        value: slotValue(cursor),
+      });
+      cursor = new Date(cursor.getTime() + stepMins * 60_000);
+    }
   }
-  return null;
+  return slots;
 }
 
-function buildPickupSlots(dateValue: string, loc: StoreLocation | null): string[] {
-  if (!loc) return [];
-  const selectedDate = dateValue ? new Date(`${dateValue}T12:00:00`) : new Date();
+/** Build all time options for the custom date picker */
+function buildCustomSlots(dateValue: string, loc: StoreLocation | null): string[] {
+  if (!loc || !dateValue) return [];
+  const selectedDate = new Date(`${dateValue}T12:00:00`);
   const dayKey = String(selectedDate.getDay());
   const dayHours = loc.hours[dayKey];
   if (!dayHours) return [];
   const [openH] = (dayHours as { open: string; close: string }).open.split(':').map(Number);
   const [closeH] = (dayHours as { open: string; close: string }).close.split(':').map(Number);
   const isHourly = loc.deliveryMode === 'hourly_delivery';
-  const slots: string[] = [];
-  for (let hour = openH; hour <= closeH; hour++) {
-    slots.push(fmtHHMM(`${String(hour).padStart(2, '0')}:00`));
-    // Only add :30 slots for pickup locations
-    if (!isHourly && hour !== closeH) slots.push(fmtHHMM(`${String(hour).padStart(2, '0')}:30`));
+  const result: string[] = [];
+  for (let h = openH; h <= closeH; h++) {
+    const t = new Date(); t.setHours(h, 0, 0, 0);
+    result.push(t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    if (!isHourly && h < closeH) {
+      const t2 = new Date(); t2.setHours(h, 30, 0, 0);
+      result.push(t2.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    }
   }
-  return slots;
+  return result;
 }
 
 export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, onOrderPlaced, onLoginRequest, prepMinutes = 20 }: Props) {
   const [customerName, setCustomerName] = useState('');
   const [phone, setPhone] = useState('');
-  const [pickupDate, setPickupDate] = useState('');
-  const [pickupTime, setPickupTime] = useState('');
+  const [selectedTimeValue, setSelectedTimeValue] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -170,47 +145,62 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
     if (user) { setCustomerName(user.name); setPhone(user.phone); }
   }, [user]);
 
+  // Reset time selection when location changes
+  useEffect(() => {
+    setSelectedTimeValue('');
+    setShowCustom(false);
+    setCustomDate('');
+    setCustomTime('');
+  }, [selectedLocId]);
+
   const selectedLoc = useMemo(() => locations.find((l) => l.id === selectedLocId) ?? null, [locations, selectedLocId]);
-
   const isDelivery = selectedLoc?.deliveryMode === 'hourly_delivery';
+  const subtotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
 
-  const tentativeSlot = useMemo(
-    () => {
-      if (!selectedLoc) return null;
-      return isDelivery
-        ? getNextHourlySlot(selectedLoc, prepMinutes)
-        : getNextPickupSlot(selectedLoc, prepMinutes);
-    },
-    [selectedLoc, prepMinutes, isDelivery]
+  const quickSlots = useMemo(
+    () => selectedLoc ? buildQuickSlots(selectedLoc, prepMinutes, 5) : [],
+    [selectedLoc, prepMinutes]
   );
 
-  const subtotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
-  const pickupSlots = useMemo(() => buildPickupSlots(pickupDate, selectedLoc), [pickupDate, selectedLoc]);
+  const customSlots = useMemo(
+    () => buildCustomSlots(customDate, selectedLoc),
+    [customDate, selectedLoc]
+  );
 
+  // When custom date/time both filled, update selectedTimeValue
   useEffect(() => {
-    if (pickupTime && !pickupSlots.includes(pickupTime)) setPickupTime('');
-  }, [pickupSlots, pickupTime]);
+    if (showCustom && customDate && customTime) {
+      setSelectedTimeValue(`${customDate} ${customTime}`);
+    }
+  }, [showCustom, customDate, customTime]);
+
+  const selectQuickSlot = (slot: TimeSlot) => {
+    setSelectedTimeValue(slot.value);
+    setShowCustom(false);
+    setCustomDate('');
+    setCustomTime('');
+  };
 
   const submitOrder = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(''); setSuccess('');
     if (!cartItems.length) { setError('Add at least one item before placing an order.'); return; }
-    if (!customerName.trim() || !phone.trim() || !pickupDate || !pickupTime) {
-      setError('Complete all pickup details before placing your order.'); return;
+    if (!customerName.trim() || !phone.trim() || !selectedTimeValue) {
+      setError(`Please select a ${isDelivery ? 'delivery' : 'pickup'} time before placing your order.`); return;
     }
     setSubmitting(true);
     try {
       const order = await placeOrder({
         customerName: customerName.trim(),
         phone: phone.trim(),
-        pickupTime: `${pickupDate} ${pickupTime}`,
+        pickupTime: selectedTimeValue,
         locationId: selectedLocId,
         locationName: selectedLoc?.name ?? '',
         isDelivery,
         items: cartItems.map(({ id, name, qty, price }) => ({ id, name, qty, price })),
       });
       onOrderPlaced(order);
-      setPickupDate(''); setPickupTime('');
+      setSelectedTimeValue(''); setCustomDate(''); setCustomTime(''); setShowCustom(false);
       setSuccess(`Order placed! Confirmation #${order.id.slice(-8).toUpperCase()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to place the order.');
@@ -221,6 +211,7 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
 
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
+      {/* Cart items */}
       <section style={S.card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <div>
@@ -263,15 +254,20 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
 
         {/* Location selector */}
         {locations.length > 0 && (
-          <div style={{ marginBottom: '1rem' }}>
-            <p style={{ ...S.label, marginBottom: '0.5rem' }}>📍 Pick-up Location</p>
+          <div style={{ marginBottom: '1.1rem' }}>
+            <p style={{ ...S.label, marginBottom: '0.5rem' }}>📍 {isDelivery ? 'Delivery' : 'Pickup'} Location</p>
             <div style={{ display: 'grid', gap: '0.5rem' }}>
               {locations.map((loc) => {
                 const selected = selectedLocId === loc.id;
                 const dayKey = String(new Date().getDay());
                 const todayHours = loc.hours[dayKey];
                 const hoursLabel = todayHours
-                  ? `Today: ${fmtHHMM((todayHours as { open: string; close: string }).open)} – ${fmtHHMM((todayHours as { open: string; close: string }).close)}`
+                  ? `${loc.deliveryMode === 'hourly_delivery' ? '🚗 Delivery' : '🏪 Pickup'} · Today ${
+                      new Date().setHours(...((todayHours as { open: string }).open.split(':').map(Number) as [number, number]), 0, 0) &&
+                      new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                    } – ${
+                      (() => { const d = new Date(); const [h, m] = (todayHours as { close: string }).close.split(':').map(Number); d.setHours(h, m, 0, 0); return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); })()
+                    }`
                   : 'Closed today';
                 return (
                   <button
@@ -292,13 +288,15 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
                     }}
                   >
                     <div>
-                      <div style={{ fontWeight: 800, color: '#78350f', fontSize: '0.92rem' }}>{loc.name}</div>
+                      <div style={{ fontWeight: 800, color: '#78350f', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        {loc.name}
+                        {loc.deliveryMode === 'hourly_delivery' && <span style={{ background: '#dcfce7', color: '#16a34a', borderRadius: 999, padding: '0.1rem 0.4rem', fontSize: '0.7rem', fontWeight: 700 }}>🚗 Delivery</span>}
+                      </div>
                       <div style={{ fontSize: '0.78rem', color: '#6b7280', marginTop: '0.1rem' }}>{loc.address}</div>
-                      {loc.phone && <div style={{ fontSize: '0.78rem', color: '#92400e' }}>{loc.phone}</div>}
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       {selected && <div style={{ color: '#f59e0b', fontWeight: 800, fontSize: '0.8rem' }}>✓ Selected</div>}
-                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.2rem' }}>{hoursLabel}</div>
+                      <div style={{ fontSize: '0.74rem', color: '#6b7280', marginTop: '0.15rem' }}>{hoursLabel}</div>
                     </div>
                   </button>
                 );
@@ -307,25 +305,101 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
           </div>
         )}
 
-        {/* Tentative time banner */}
-        {selectedLoc && tentativeSlot && (
-          <div style={{ background: isDelivery ? '#f0fdf4' : '#dbeafe', border: `1px solid ${isDelivery ? '#86efac' : '#93c5fd'}`, borderRadius: '0.65rem', padding: '0.6rem 0.9rem', marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: '1.1rem' }}>{isDelivery ? '🚗' : '⏱'}</span>
-            <div>
-              <span style={{ fontWeight: 800, color: isDelivery ? '#16a34a' : '#1e40af' }}>
-                Next {isDelivery ? 'delivery' : 'available'}: {tentativeSlot.label}
-              </span>
-              <span style={{ color: isDelivery ? '#15803d' : '#3b82f6', fontSize: '0.8rem', display: 'block' }}>
-                {isDelivery
-                  ? 'Hourly delivery slot — store will confirm exact time'
-                  : 'Tentative — confirmed once store accepts your order'}
-              </span>
+        {/* Time slot picker */}
+        {selectedLoc && (
+          <div style={{ marginBottom: '1.1rem' }}>
+            <p style={{ ...S.label, marginBottom: '0.5rem' }}>
+              {isDelivery ? '🚗 Delivery Slot' : '⏱ Pickup Time'}
+              {selectedTimeValue && !showCustom && (
+                <span style={{ marginLeft: '0.5rem', color: '#16a34a', fontWeight: 700, fontSize: '0.82rem' }}>✓ Selected</span>
+              )}
+            </p>
+
+            {/* Quick slot pills */}
+            <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+              {quickSlots.map((slot) => {
+                const active = selectedTimeValue === slot.value && !showCustom;
+                return (
+                  <button
+                    key={slot.value}
+                    type="button"
+                    onClick={() => selectQuickSlot(slot)}
+                    style={{
+                      background: active ? '#f59e0b' : '#fff',
+                      color: active ? '#fff' : '#78350f',
+                      border: `2px solid ${active ? '#f59e0b' : '#fed7aa'}`,
+                      borderRadius: '0.65rem',
+                      padding: '0.45rem 0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      textAlign: 'center',
+                      lineHeight: 1.3,
+                      transition: 'all 0.1s',
+                    }}
+                  >
+                    <div>{slot.label}</div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 600, opacity: active ? 0.9 : 0.7 }}>{slot.sublabel}</div>
+                  </button>
+                );
+              })}
+
+              {/* Custom time toggle */}
+              <button
+                type="button"
+                onClick={() => { setShowCustom((v) => !v); if (!showCustom) setSelectedTimeValue(''); }}
+                style={{
+                  background: showCustom ? '#fef3c7' : '#f9fafb',
+                  color: '#374151',
+                  border: `2px solid ${showCustom ? '#f59e0b' : '#e5e7eb'}`,
+                  borderRadius: '0.65rem',
+                  padding: '0.45rem 0.75rem',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                }}
+              >
+                📅 Custom
+              </button>
             </div>
-          </div>
-        )}
-        {selectedLoc && !tentativeSlot && (
-          <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '0.65rem', padding: '0.6rem 0.9rem', marginBottom: '1rem', color: '#dc2626', fontWeight: 700, fontSize: '0.85rem' }}>
-            🚫 This location appears to be closed for the next 7 days. Please call to arrange pickup.
+
+            {/* Custom date + time picker */}
+            {showCustom && (
+              <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', background: '#fffbeb', border: '1px solid #fed7aa', borderRadius: '0.65rem', padding: '0.75rem' }}>
+                <div>
+                  <label style={S.label}>{isDelivery ? 'Delivery Date' : 'Pickup Date'}</label>
+                  <input
+                    type="date"
+                    value={customDate}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => { setCustomDate(e.target.value); setCustomTime(''); }}
+                    style={S.inp}
+                  />
+                </div>
+                <div>
+                  <label style={S.label}>{isDelivery ? 'Delivery Slot' : 'Pickup Time'}</label>
+                  <select
+                    value={customTime}
+                    onChange={(e) => setCustomTime(e.target.value)}
+                    style={S.inp}
+                    disabled={!customDate}
+                  >
+                    <option value="">Select a time</option>
+                    {customSlots.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  {customDate && customSlots.length === 0 && (
+                    <p style={{ ...mutedText, fontSize: '0.78rem', marginTop: '0.3rem' }}>Closed on this day — pick another date.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Delivery note */}
+            {isDelivery && selectedTimeValue && (
+              <p style={{ fontSize: '0.78rem', color: '#16a34a', fontWeight: 600, marginTop: '0.4rem' }}>
+                🚗 Hourly slot — store will confirm exact delivery time after accepting
+              </p>
+            )}
           </div>
         )}
 
@@ -346,22 +420,16 @@ export default function CartTab({ user, cartItems, onUpdateQty, onRemoveItem, on
               </div>
               <div>
                 <label htmlFor="phone" style={S.label}>Phone</label>
-                <input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ ...S.inp, background: '#f9fafb' }} readOnly placeholder="(609) 555-1234" />
+                <input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ ...S.inp, background: '#f9fafb' }} readOnly />
               </div>
 
-              <div style={{ display: 'grid', gap: '0.9rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-                <div>
-                  <label htmlFor="pickupDate" style={S.label}>{isDelivery ? 'Delivery Date' : 'Pickup Date'}</label>
-                  <input id="pickupDate" type="date" value={pickupDate} min={new Date().toISOString().split('T')[0]} onChange={(e) => setPickupDate(e.target.value)} style={S.inp} />
+              {/* Selected time summary */}
+              {selectedTimeValue && (
+                <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '0.6rem', padding: '0.55rem 0.9rem', fontWeight: 700, color: '#78350f', fontSize: '0.9rem' }}>
+                  {isDelivery ? '🚗' : '📍'} {isDelivery ? 'Delivery' : 'Pickup'}: {selectedTimeValue}
+                  {selectedLoc?.name ? ` @ ${selectedLoc.name}` : ''}
                 </div>
-                <div>
-                  <label htmlFor="pickupTime" style={S.label}>{isDelivery ? 'Delivery Slot' : 'Pickup Time'}</label>
-                  <select id="pickupTime" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} style={S.inp}>
-                    <option value="">Select {isDelivery ? 'a delivery slot' : 'a time'}</option>
-                    {pickupSlots.map((slot) => <option key={slot} value={slot}>{slot}</option>)}
-                  </select>
-                </div>
-              </div>
+              )}
 
               <button type="submit" disabled={submitting} style={{ ...S.primaryBtn, opacity: submitting ? 0.7 : 1 }}>
                 {submitting ? 'Placing Order...' : isDelivery ? '🚗 Place Delivery Order' : 'Place Order'}
