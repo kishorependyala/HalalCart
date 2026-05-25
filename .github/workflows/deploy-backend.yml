@@ -22,14 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install -r backend/requirements.txt
-
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -37,48 +29,26 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Zip backend for deployment
+      - name: Deploy to Azure App Service
         run: |
+          RG="eu-hack-rg"
           cd backend
           zip -r ../backend-deploy.zip . \
             -x "venv/*" \
             -x "__pycache__/*" \
             -x "*.pyc" \
             -x ".env"
-
-      - name: Deploy via Kudu (works even when app is stopped)
-        run: |
-          RG="eu-hack-rg"
-          # Start the app first and wait for it to be ready
-          echo "Starting app service..."
-          az webapp start --name halalcart-api --resource-group "$RG"
-          echo "Waiting 20s for app to initialize..."
-          sleep 20
-          # Get publishing credentials
-          CREDS=$(az webapp deployment list-publishing-credentials \
-            --name halalcart-api --resource-group "$RG" \
-            --query "{u:publishingUserName,p:publishingPassword}" -o json)
-          U=$(echo "$CREDS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['u'])")
-          P=$(echo "$CREDS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['p'])")
-          # Deploy via Kudu SCM
-          HTTP=$(curl -s -o /tmp/deploy_out.txt -w "%{http_code}" -X POST \
-            -u "$U:$P" \
-            --data-binary @backend-deploy.zip \
-            "https://halalcart-api.scm.azurewebsites.net/api/zipdeploy")
-          cat /tmp/deploy_out.txt
-          echo "HTTP status: $HTTP"
-          if [ "$HTTP" -lt 200 ] || [ "$HTTP" -ge 300 ]; then
-            echo "Deployment failed with HTTP $HTTP"
-            exit 1
-          fi
-          # Set startup command
+          cd ..
           az webapp config set \
             --name halalcart-api --resource-group "$RG" \
             --startup-file 'gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 run:app'
+          az webapp deploy \
+            --name halalcart-api --resource-group "$RG" \
+            --src-path backend-deploy.zip --type zip
 
       - name: Warm up backend
         run: |
           echo "Waiting for app to start..."
-          sleep 30
+          sleep 20
           curl -sf https://halalcart-api.azurewebsites.net/api/health || true
-          echo "Backend warmed up."
+          echo "Done."
