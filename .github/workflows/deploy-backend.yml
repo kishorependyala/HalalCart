@@ -48,15 +48,19 @@ jobs:
 
       - name: Deploy via Kudu (works even when app is stopped)
         run: |
-          RG=$(az webapp list --query "[?name=='halalcart-api'].resourceGroup" -o tsv)
-          echo "Resource group: $RG"
+          RG="eu-hack-rg"
+          # Start the app first and wait for it to be ready
+          echo "Starting app service..."
+          az webapp start --name halalcart-api --resource-group "$RG"
+          echo "Waiting 20s for app to initialize..."
+          sleep 20
           # Get publishing credentials
           CREDS=$(az webapp deployment list-publishing-credentials \
             --name halalcart-api --resource-group "$RG" \
             --query "{u:publishingUserName,p:publishingPassword}" -o json)
           U=$(echo "$CREDS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['u'])")
           P=$(echo "$CREDS" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['p'])")
-          # Deploy via Kudu SCM (available even when main site is stopped)
+          # Deploy via Kudu SCM
           HTTP=$(curl -s -o /tmp/deploy_out.txt -w "%{http_code}" -X POST \
             -u "$U:$P" \
             --data-binary @backend-deploy.zip \
@@ -71,8 +75,6 @@ jobs:
           az webapp config set \
             --name halalcart-api --resource-group "$RG" \
             --startup-file 'gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 run:app'
-          # Start the app
-          az webapp start --name halalcart-api --resource-group "$RG" || true
 
       - name: Warm up backend
         run: |
