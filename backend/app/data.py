@@ -41,36 +41,174 @@ def get_orders_dir() -> Path:
     return orders_dir
 
 
+def get_users_dir() -> Path:
+    users_dir = get_data_dir() / 'users'
+    users_dir.mkdir(parents=True, exist_ok=True)
+    return users_dir
+
+
+# ── User ID sequence ─────────────────────────────────────────────────────────
+# ID format: yyyyMMdd + 10-digit zero-padded sequence  e.g. 202605240000000001
+
+def _seq_path() -> Path:
+    return get_users_dir() / '_seq.json'
+
+
+def _index_path() -> Path:
+    return get_users_dir() / '_index.json'
+
+
+def _next_user_id(date_str: str = '') -> str:
+    """Allocate next user ID. date_str is YYYYMMDD; defaults to today."""
+    from datetime import date as _date
+    if not date_str:
+        date_str = _date.today().strftime('%Y%m%d')
+    seq_path = _seq_path()
+    seq = 1
+    if seq_path.exists():
+        try:
+            seq = json.loads(seq_path.read_text(encoding='utf-8')).get('seq', 0) + 1
+        except Exception:
+            pass
+    seq_path.write_text(json.dumps({'seq': seq}), encoding='utf-8')
+    return f'{date_str}{seq:010d}'
+
+
+def _load_index() -> dict[str, str]:
+    """phone → userId"""
+    path = _index_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_index(index: dict[str, str]) -> None:
+    _index_path().write_text(json.dumps(index, indent=2), encoding='utf-8')
+
+
+# ── User record helpers ──────────────────────────────────────────────────────
+
+def _user_path_by_id(user_id: str) -> Path:
+    return get_users_dir() / f'{user_id}.json'
+
+
+def load_user(phone: str) -> Optional[dict[str, Any]]:
+    index = _load_index()
+    user_id = index.get(phone)
+    if not user_id:
+        return None
+    path = _user_path_by_id(user_id)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return None
+
+
+def save_user(user: dict[str, Any]) -> dict[str, Any]:
+    user_id = user.get('id')
+    if not user_id:
+        raise ValueError('User must have an id before saving.')
+    _user_path_by_id(user_id).write_text(json.dumps(user, indent=2), encoding='utf-8')
+    # Keep index in sync
+    index = _load_index()
+    index[user['phone']] = user_id
+    _save_index(index)
+    return user
+
+
+def upsert_user_from_order(order: dict[str, Any]) -> None:
+    """Create or update the user record in data/users/ from a single order."""
+    phone = order.get('phone', '').strip()
+    if not phone:
+        return
+    existing = load_user(phone)
+    created_at = order.get('createdAt', '')
+    total = order.get('total', 0.0)
+
+    if existing is None:
+        # Derive date prefix from order's createdAt
+        date_prefix = created_at[:10].replace('-', '') if created_at else ''
+        new_id = _next_user_id(date_prefix)
+        save_user({
+            'id': new_id,
+            'phone': phone,
+            'name': order.get('customerName', ''),
+            'createdAt': created_at,
+            'lastOrderAt': created_at,
+            'orderCount': 1,
+            'totalSpent': round(float(total), 2),
+        })
+    else:
+        existing['orderCount'] = existing.get('orderCount', 0) + 1
+        existing['totalSpent'] = round(existing.get('totalSpent', 0.0) + float(total), 2)
+        if created_at > existing.get('lastOrderAt', ''):
+            existing['lastOrderAt'] = created_at
+            existing['name'] = order.get('customerName', existing['name'])
+        save_user(existing)
+
+
+def _migrate_users_from_orders() -> None:
+    """One-time migration: build users/ from existing orders if the index is empty."""
+    if _load_index():
+        return  # Already migrated
+    # Aggregate orders by phone, sorted oldest-first so IDs reflect join date
+    aggregated: dict[str, dict[str, Any]] = {}
+    for file_path in sorted(get_orders_dir().glob('*.json')):
+        try:
+            order = json.loads(file_path.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+        phone = order.get('phone', '').strip()
+        if not phone:
+            continue
+        created = order.get('createdAt', '')
+        total = float(order.get('total', 0.0))
+        if phone not in aggregated:
+            aggregated[phone] = {
+                'phone': phone,
+                'name': order.get('customerName', ''),
+                'createdAt': created,
+                'lastOrderAt': created,
+                'orderCount': 0,
+                'totalSpent': 0.0,
+            }
+        aggregated[phone]['orderCount'] += 1
+        aggregated[phone]['totalSpent'] = round(aggregated[phone]['totalSpent'] + total, 2)
+        if created > aggregated[phone]['lastOrderAt']:
+            aggregated[phone]['lastOrderAt'] = created
+            aggregated[phone]['name'] = order.get('customerName', aggregated[phone]['name'])
+    # Assign IDs in order of first-seen (oldest createdAt first)
+    for user in sorted(aggregated.values(), key=lambda u: u.get('createdAt', '')):
+        date_prefix = user['createdAt'][:10].replace('-', '') if user.get('createdAt') else ''
+        user['id'] = _next_user_id(date_prefix)
+        save_user(user)
+
+
+def list_users() -> list[dict[str, Any]]:
+    """Return all users from data/users/, migrating from orders on first call."""
+    _migrate_users_from_orders()
+    users = []
+    index = _load_index()
+    for user_id in index.values():
+        path = _user_path_by_id(user_id)
+        try:
+            users.append(json.loads(path.read_text(encoding='utf-8')))
+        except Exception:
+            continue
+    return sorted(users, key=lambda u: u.get('lastOrderAt', ''), reverse=True)
+
+
 def list_orders() -> list[dict[str, Any]]:
     orders: list[dict[str, Any]] = []
     for file_path in sorted(get_orders_dir().glob('*.json'), reverse=True):
         with file_path.open('r', encoding='utf-8') as handle:
             orders.append(json.load(handle))
     return sorted(orders, key=lambda order: order.get('createdAt', ''), reverse=True)
-
-
-def list_users() -> list[dict[str, Any]]:
-    """Aggregate unique users from all orders, sorted by most recent order."""
-    seen: dict[str, dict[str, Any]] = {}
-    for order in list_orders():
-        phone = order.get('phone', '')
-        if not phone:
-            continue
-        if phone not in seen:
-            seen[phone] = {
-                'name': order.get('customerName', ''),
-                'phone': phone,
-                'orderCount': 0,
-                'lastOrderAt': '',
-                'totalSpent': 0.0,
-            }
-        seen[phone]['orderCount'] += 1
-        seen[phone]['totalSpent'] = round(seen[phone]['totalSpent'] + order.get('total', 0.0), 2)
-        created = order.get('createdAt', '')
-        if created > seen[phone]['lastOrderAt']:
-            seen[phone]['lastOrderAt'] = created
-            seen[phone]['name'] = order.get('customerName', seen[phone]['name'])
-    return sorted(seen.values(), key=lambda u: u['lastOrderAt'], reverse=True)
 
 
 def get_order(order_id: str) -> Optional[dict[str, Any]]:
@@ -85,6 +223,7 @@ def save_order(order: dict[str, Any]) -> dict[str, Any]:
     file_path = get_orders_dir() / f"{order['id']}.json"
     with file_path.open('w', encoding='utf-8') as handle:
         json.dump(order, handle, indent=2)
+    upsert_user_from_order(order)
     return order
 
 
@@ -93,7 +232,11 @@ def update_order(order_id: str, updates: dict[str, Any]) -> Optional[dict[str, A
     if order is None:
         return None
     order.update(updates)
-    return save_order(order)
+    # Save order file without re-upsert (status changes shouldn't inflate orderCount)
+    file_path = get_orders_dir() / f"{order['id']}.json"
+    with file_path.open('w', encoding='utf-8') as handle:
+        json.dump(order, handle, indent=2)
+    return order
 
 
 def avg_goat_prep_minutes() -> int:
