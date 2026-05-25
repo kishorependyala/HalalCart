@@ -1,7 +1,7 @@
 import { useAuth0 } from '@auth0/auth0-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { checkPhone, loginWithPin, setPinUser, signupUser, User } from '../api';
+import { checkPhone, loginWithPin, setPinUser, signupUser, User, getLocations } from '../api';
 import { S, mutedText } from '../theme';
 
 type AuthStep = 'phone' | 'pin' | 'set-pin' | 'signup-name' | 'signup-pin' | 'forgot';
@@ -28,9 +28,13 @@ export default function LoginModal({ onLogin, onClose }: Props) {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [storePhone, setStorePhone] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, [step]);
+  useEffect(() => {
+    getLocations().then((locs) => { if (locs[0]?.phone) setStorePhone(locs[0].phone); }).catch(() => {});
+  }, []);
 
   if (isAuthenticated && auth0User) { onClose(); return null; }
 
@@ -239,7 +243,9 @@ export default function LoginModal({ onLogin, onClose }: Props) {
           <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.5rem', textAlign: 'center' }}>
             <div style={{ fontSize: '1.5rem' }}>📞</div>
             <p style={{ margin: 0, fontWeight: 700, color: '#78350f' }}>Call the store to reset your PIN</p>
-            <a href="tel:+16092359158" style={{ color: '#d97706', fontWeight: 800, fontSize: '1.05rem' }}>(609) 235-9158</a>
+            {storePhone && (
+              <a href={`tel:${storePhone.replace(/\D/g, '')}`} style={{ color: '#d97706', fontWeight: 800, fontSize: '1.05rem' }}>{storePhone}</a>
+            )}
             <p style={{ ...mutedText, fontSize: '0.78rem', margin: 0 }}>
               The store admin can clear your PIN so you can set a new one on next sign-in.
             </p>

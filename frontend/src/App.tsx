@@ -1,7 +1,7 @@
 import { useAuth0 } from '@auth0/auth0-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getOrders, MenuItem, Order, User } from './api';
+import { getLocations, getOrders, getPublicSettings, MenuItem, Order, StoreLocation, User } from './api';
 import AdminTab from './components/AdminTab';
 import CartTab, { CartItem } from './components/CartTab';
 import LoginModal from './components/LoginModal';
@@ -42,16 +42,23 @@ function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [viewAsUser, setViewAsUser] = useState<User | null>(null);
+  const [locations, setLocations] = useState<StoreLocation[]>([]);
+  const [prepMinutes, setPrepMinutes] = useState<{ chicken: number; goat: number }>({ chicken: 20, goat: 45 });
+
+  useEffect(() => {
+    getLocations().then(setLocations).catch(() => {});
+    getPublicSettings().then((s) => setPrepMinutes({ chicken: s.chickenPrepMinutes, goat: s.goatPrepMinutes })).catch(() => {});
+  }, []);
 
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.qty, 0), [cartItems]);
   const cartTotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.price * item.qty, 0), [cartItems]);
   const cartPrepMinutes = useMemo(() => {
     const hasGoat = cartItems.some((i) => i.id.startsWith('g'));
     const hasChicken = cartItems.some((i) => i.id.startsWith('c'));
-    if (hasGoat) return 45;
-    if (hasChicken) return 20;
-    return 20;
-  }, [cartItems]);
+    if (hasGoat) return prepMinutes.goat;
+    if (hasChicken) return prepMinutes.chicken;
+    return prepMinutes.chicken;
+  }, [cartItems, prepMinutes]);
 
   const tabs = useMemo(() => {
     const base = [...customerTabs];
@@ -172,7 +179,9 @@ function App() {
         <div style={{ maxWidth: 680, margin: '0 auto', padding: '0.9rem 1rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
           <div>
             <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#78350f' }}>🥩 Halal Meat Market</div>
-            <div style={{ color: '#92400e', fontSize: '0.88rem' }}>Pickup only · 355 Applegarth Rd, Monroe Township, NJ</div>
+            <div style={{ color: '#92400e', fontSize: '0.88rem' }}>
+              {locations[0] ? `${locations[0].address}` : 'Fresh halal meats'}
+            </div>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 999, padding: '0.35rem 0.75rem', color: '#92400e', fontWeight: 800 }}>

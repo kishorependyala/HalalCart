@@ -274,7 +274,11 @@ export const deleteMenuItem = (
 export type AppSettings = {
   chickenPrepMinutes: number;
   goatPrepMinutes: number;
+  deletePin?: string;
 };
+
+export const getPublicSettings = () =>
+  fetch(`${BASE}/api/settings`).then((r) => parseResponse<Pick<AppSettings, 'chickenPrepMinutes' | 'goatPrepMinutes'>>(r));
 
 export const getSettings = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
   fetch(`${BASE}/api/admin/settings`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<AppSettings>(r));

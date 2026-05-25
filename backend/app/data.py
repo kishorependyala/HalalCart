@@ -42,6 +42,44 @@ def get_orders_dir() -> Path:
     return orders_dir
 
 
+def _order_day_dir(created_at_iso: str) -> Path:
+    """Return data/orders/YYYY/MM/DD/ for a given ISO timestamp, creating it if needed."""
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(created_at_iso.replace('Z', '+00:00'))
+        day_dir = get_orders_dir() / dt.strftime('%Y') / dt.strftime('%m') / dt.strftime('%d')
+    except (ValueError, AttributeError):
+        from datetime import date as _date
+        d = _date.today()
+        day_dir = get_orders_dir() / d.strftime('%Y') / d.strftime('%m') / d.strftime('%d')
+    day_dir.mkdir(parents=True, exist_ok=True)
+    return day_dir
+
+
+def _find_order_file(order_id: str) -> Optional[Path]:
+    """Find an order JSON file anywhere under data/orders/."""
+    for p in get_orders_dir().rglob(f'{order_id}.json'):
+        return p
+    return None
+
+
+def _migrate_flat_orders() -> None:
+    """One-time: move any data/orders/*.json flat files into yyyy/mm/dd/ subdirs."""
+    orders_dir = get_orders_dir()
+    for fp in list(orders_dir.glob('*.json')):
+        if fp.name.startswith('_'):
+            continue
+        try:
+            order = json.loads(fp.read_text(encoding='utf-8'))
+            dest = _order_day_dir(order.get('createdAt', '')) / fp.name
+            if not dest.exists():
+                fp.rename(dest)
+            else:
+                fp.unlink()
+        except Exception:
+            pass
+
+
 def get_users_dir() -> Path:
     users_dir = get_data_dir() / 'users'
     users_dir.mkdir(parents=True, exist_ok=True)
@@ -270,23 +308,31 @@ def list_users() -> list[dict[str, Any]]:
 
 
 def list_orders() -> list[dict[str, Any]]:
+    _migrate_flat_orders()
     orders: list[dict[str, Any]] = []
-    for file_path in sorted(get_orders_dir().glob('*.json'), reverse=True):
-        with file_path.open('r', encoding='utf-8') as handle:
-            orders.append(json.load(handle))
+    for file_path in get_orders_dir().rglob('*.json'):
+        if file_path.name.startswith('_'):
+            continue
+        try:
+            with file_path.open('r', encoding='utf-8') as handle:
+                orders.append(json.load(handle))
+        except Exception:
+            continue
     return sorted(orders, key=lambda order: order.get('createdAt', ''), reverse=True)
 
 
 def get_order(order_id: str) -> Optional[dict[str, Any]]:
-    file_path = get_orders_dir() / f'{order_id}.json'
-    if not file_path.exists():
+    _migrate_flat_orders()
+    file_path = _find_order_file(order_id)
+    if file_path is None:
         return None
     with file_path.open('r', encoding='utf-8') as handle:
         return json.load(handle)
 
 
 def save_order(order: dict[str, Any]) -> dict[str, Any]:
-    file_path = get_orders_dir() / f"{order['id']}.json"
+    day_dir = _order_day_dir(order.get('createdAt', ''))
+    file_path = day_dir / f"{order['id']}.json"
     with file_path.open('w', encoding='utf-8') as handle:
         json.dump(order, handle, indent=2)
     upsert_user_from_order(order)
@@ -298,8 +344,7 @@ def update_order(order_id: str, updates: dict[str, Any]) -> Optional[dict[str, A
     if order is None:
         return None
     order.update(updates)
-    # Save order file without re-upsert (status changes shouldn't inflate orderCount)
-    file_path = get_orders_dir() / f"{order['id']}.json"
+    file_path = _find_order_file(order_id) or (_order_day_dir(order.get('createdAt', '')) / f"{order_id}.json")
     with file_path.open('w', encoding='utf-8') as handle:
         json.dump(order, handle, indent=2)
     return order
@@ -607,6 +652,7 @@ def delete_location(loc_id: str) -> bool:
 DEFAULT_SETTINGS: dict[str, Any] = {
     'chickenPrepMinutes': CHICKEN_PREP_MINUTES,
     'goatPrepMinutes': DEFAULT_GOAT_PREP_MINUTES,
+    'deletePin': '1234567',
 }
 
 

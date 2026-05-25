@@ -702,7 +702,6 @@ function OrderCard({ order, isBusy, prepEdit, deliveryTimeEdit, onPrepEditChange
 // ── Menu Management Panel ─────────────────────────────────────────────────────
 
 const CATEGORIES: MenuItem['category'][] = ['Goat', 'Chicken', 'Fish'];
-const DELETE_PIN = '1234567';
 
 type NewItemDraft = { name: string; category: MenuItem['category']; price: string; unit: string; description: string };
 const emptyDraft = (): NewItemDraft => ({ name: '', category: 'Chicken', price: '', unit: 'per lb', description: '' });
@@ -738,9 +737,8 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
       .then(([menuData, settingsData]) => {
         setMenu(menuData);
         setSettings(settingsData);
-        setSettingsDraft({ chickenPrepMinutes: settingsData.chickenPrepMinutes, goatPrepMinutes: settingsData.goatPrepMinutes });
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load menu.'))
+        setSettingsDraft({ chickenPrepMinutes: settingsData.chickenPrepMinutes, goatPrepMinutes: settingsData.goatPrepMinutes, deletePin: settingsData.deletePin });
+      })      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load menu.'))
       .finally(() => setLoading(false));
   }, [adminUser]);
 
@@ -779,7 +777,7 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
     setDeletingId(item.id); setDeletePin(''); setEditingId(null); setMsg('');
   };
   const confirmDelete = async (itemId: string) => {
-    if (deletePin !== DELETE_PIN) { setMsg('Incorrect PIN.'); return; }
+    if (deletePin !== (settings?.deletePin ?? '1234567')) { setMsg('Incorrect PIN.'); return; }
     setDeleteBusy(true); setMsg('');
     try {
       await deleteMenuItem(itemId, adminUser);
@@ -811,7 +809,7 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
     try {
       const updated = await updateSettings(settingsDraft, adminUser);
       setSettings(updated);
-      setSettingsDraft({ chickenPrepMinutes: updated.chickenPrepMinutes, goatPrepMinutes: updated.goatPrepMinutes });
+      setSettingsDraft({ chickenPrepMinutes: updated.chickenPrepMinutes, goatPrepMinutes: updated.goatPrepMinutes, deletePin: updated.deletePin });
       setMsg('Settings saved.');
     } catch (err) { setMsg(err instanceof Error ? err.message : 'Failed to save settings.'); }
     finally { setSettingsBusy(false); }
@@ -995,9 +993,14 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
               <input type="number" min={1} style={S.inp} value={settingsDraft.goatPrepMinutes ?? ''}
                 onChange={(e) => setSettingsDraft((s) => ({ ...s, goatPrepMinutes: parseInt(e.target.value, 10) || 0 }))} />
             </div>
+            <div style={{ flex: '1 1 140px' }}>
+              <label style={S.label}>🔐 Delete PIN</label>
+              <input type="text" maxLength={20} style={S.inp} value={settingsDraft.deletePin ?? ''}
+                onChange={(e) => setSettingsDraft((s) => ({ ...s, deletePin: e.target.value }))} />
+            </div>
           </div>
           <button type="submit" disabled={settingsBusy} style={{ ...S.primaryBtn, opacity: settingsBusy ? 0.6 : 1, justifySelf: 'start' }}>
-            {settingsBusy ? 'Saving…' : '💾 Save Prep Times'}
+            {settingsBusy ? 'Saving…' : '💾 Save Settings'}
           </button>
         </form>
       </div>

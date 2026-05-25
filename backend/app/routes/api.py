@@ -166,6 +166,16 @@ def get_locations():
     return jsonify(load_locations())
 
 
+@bp.get('/settings')
+def get_public_settings():
+    """Public endpoint: returns non-sensitive settings (prep times)."""
+    s = load_settings()
+    return jsonify({
+        'chickenPrepMinutes': s.get('chickenPrepMinutes', 20),
+        'goatPrepMinutes': s.get('goatPrepMinutes', 45),
+    })
+
+
 @bp.get('/menu')
 def get_menu():
     return jsonify(load_menu())
@@ -504,6 +514,10 @@ def admin_patch_settings():
             settings['goatPrepMinutes'] = val
         except (TypeError, ValueError):
             return jsonify({'error': 'goatPrepMinutes must be a positive integer.'}), 400
+    if 'deletePin' in payload:
+        val = str(payload['deletePin']).strip()
+        if val:
+            settings['deletePin'] = val
     save_settings(settings)
     return jsonify(settings)
 
