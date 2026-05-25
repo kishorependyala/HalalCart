@@ -1,7 +1,7 @@
 import { useAuth0 } from '@auth0/auth0-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getLocations, getOrders, getPublicSettings, MenuItem, Order, StoreLocation, User } from './api';
+import { getLocations, getOrders, getPublicSettings, MenuItem, Order, socialAuth, StoreLocation, User } from './api';
 import AdminTab from './components/AdminTab';
 import CartTab, { CartItem } from './components/CartTab';
 import LoginModal from './components/LoginModal';
@@ -79,26 +79,29 @@ function App() {
     setShowProfile(false);
   };
 
-  // Sync Auth0 social login → our User state
+  // Sync Auth0 social login → our User state (creates/finds user in backend)
   useEffect(() => {
     if (isAuthenticated && auth0User) {
-      const email = auth0User.email || '';
+      const email = (auth0User.email || '').toLowerCase();
       const name = auth0User.name || auth0User.nickname || email.split('@')[0] || 'User';
-      const isAdmin = !!ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-      const socialUser: User = {
-        name,
-        phone: email,   // use email as the order identifier for social users
-        email,
-        picture: auth0User.picture,
-        isAdmin,
-        authMethod: 'social',
-      };
-      // Only update if this social user isn't already stored
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const current = stored ? JSON.parse(stored) as User : null;
-      if (!current || current.authMethod === 'social' || current.phone !== socialUser.phone) {
+      const picture = auth0User.picture || '';
+      if (!email) return;
+      // Call backend to create/find the user record
+      socialAuth(email, name, picture).then((res) => {
+        if (res.success && res.user) {
+          const u: User = { ...res.user, email, picture, authMethod: 'social' };
+          const stored = localStorage.getItem(STORAGE_KEY);
+          const current = stored ? JSON.parse(stored) as User : null;
+          // Only overwrite if it's a different identity
+          if (!current || current.authMethod === 'social' || current.id !== u.id) {
+            handleLogin(u);
+          }
+        }
+      }).catch(() => {
+        // Fallback: use Auth0 data client-side if backend unreachable
+        const socialUser: User = { name, phone: email, email, picture, isAdmin: false, authMethod: 'social' };
         handleLogin(socialUser);
-      }
+      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, auth0User]);

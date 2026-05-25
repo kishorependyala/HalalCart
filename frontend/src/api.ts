@@ -1,10 +1,12 @@
 const BASE = process.env.REACT_APP_API_BASE_URL || 'http://localhost:5001';
 
 export type User = {
+  id?: string;              // internal user ID (yyyyMMdd + sequence)
   name: string;
-  phone: string;        // phone number OR email (used as order identifier)
-  email?: string;       // set for social-login users
-  picture?: string;     // avatar URL from social provider
+  phone: string;            // phone number OR email (used as order identifier)
+  email?: string;           // set for social-login users
+  emails?: string[];        // all linked emails
+  picture?: string;         // avatar URL from social provider
   isAdmin: boolean;
   authMethod?: 'phone' | 'social';
 };
@@ -112,6 +114,27 @@ export const adminResetPin = (
     headers: { ...adminHeaders(adminUser), 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone }),
   }).then((r) => parseResponse<{ success: boolean; message: string }>(r));
+
+export const socialAuth = (email: string, name: string, picture?: string) =>
+  fetch(`${BASE}/api/auth/social`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name, picture }),
+  }).then((r) => r.json() as Promise<{ success: boolean; user?: User; error?: string }>);
+
+export const linkEmail = (userId: string, email: string) =>
+  fetch(`${BASE}/api/auth/link-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, email }),
+  }).then((r) => r.json() as Promise<{ success: boolean; user?: User; message?: string }>);
+
+export const linkPhone = (userId: string, phone: string, pin: string) =>
+  fetch(`${BASE}/api/auth/link-phone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, phone, pin }),
+  }).then((r) => r.json() as Promise<{ success: boolean; user?: User; message?: string }>);
 
 export const getMenu = () => fetch(`${BASE}/api/menu`).then((r) => parseResponse<MenuItem[]>(r));
 

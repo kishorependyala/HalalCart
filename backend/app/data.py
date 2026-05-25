@@ -128,17 +128,32 @@ def _save_index(index: dict[str, str]) -> None:
     _index_path().write_text(json.dumps(index, indent=2), encoding='utf-8')
 
 
+def _email_index_path() -> Path:
+    return get_users_dir() / '_email_index.json'
+
+
+def _load_email_index() -> dict[str, str]:
+    """email → userId"""
+    path = _email_index_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_email_index(index: dict[str, str]) -> None:
+    _email_index_path().write_text(json.dumps(index, indent=2), encoding='utf-8')
+
+
 # ── User record helpers ──────────────────────────────────────────────────────
 
 def _user_path_by_id(user_id: str) -> Path:
     return get_users_dir() / f'{user_id}.json'
 
 
-def load_user(phone: str) -> Optional[dict[str, Any]]:
-    index = _load_index()
-    user_id = index.get(phone)
-    if not user_id:
-        return None
+def load_user_by_id(user_id: str) -> Optional[dict[str, Any]]:
     path = _user_path_by_id(user_id)
     if path.exists():
         try:
@@ -148,15 +163,40 @@ def load_user(phone: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def load_user(phone: str) -> Optional[dict[str, Any]]:
+    index = _load_index()
+    user_id = index.get(phone)
+    if not user_id:
+        return None
+    return load_user_by_id(user_id)
+
+
+def load_user_by_email(email: str) -> Optional[dict[str, Any]]:
+    email = email.strip().lower()
+    index = _load_email_index()
+    user_id = index.get(email)
+    if not user_id:
+        return None
+    return load_user_by_id(user_id)
+
+
 def save_user(user: dict[str, Any]) -> dict[str, Any]:
     user_id = user.get('id')
     if not user_id:
         raise ValueError('User must have an id before saving.')
     _user_path_by_id(user_id).write_text(json.dumps(user, indent=2), encoding='utf-8')
-    # Keep index in sync
-    index = _load_index()
-    index[user['phone']] = user_id
-    _save_index(index)
+    # Sync phone index
+    if user.get('phone'):
+        index = _load_index()
+        index[user['phone']] = user_id
+        _save_index(index)
+    # Sync email index
+    emails = user.get('emails', [])
+    if emails:
+        ei = _load_email_index()
+        for email in emails:
+            ei[email.strip().lower()] = user_id
+        _save_email_index(ei)
     return user
 
 
@@ -225,7 +265,67 @@ def signup_user(phone: str, name: str, pin: str) -> dict[str, Any]:
     return save_user(user)
 
 
-def upsert_user_from_order(order: dict[str, Any]) -> None:
+def social_login_or_create(email: str, name: str, picture: str = '') -> dict[str, Any]:
+    """Find a user by email or create one. Returns the user dict."""
+    email = email.strip().lower()
+    existing = load_user_by_email(email)
+    if existing is not None:
+        # Freshen picture if provided
+        if picture and existing.get('picture') != picture:
+            existing['picture'] = picture
+            save_user(existing)
+        return existing
+    # Create new social-only user (no phone, no PIN)
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    date_prefix = datetime.now().strftime('%Y%m%d')
+    new_id = _next_user_id(date_prefix)
+    user: dict[str, Any] = {
+        'id': new_id,
+        'name': name,
+        'emails': [email],
+        'picture': picture,
+        'createdAt': now,
+        'lastOrderAt': '',
+        'orderCount': 0,
+        'totalSpent': 0.0,
+    }
+    return save_user(user)
+
+
+def link_email_to_user(user_id: str, email: str) -> tuple[Optional[dict[str, Any]], str]:
+    """Add an email to an existing user. Returns (user, error_msg)."""
+    email = email.strip().lower()
+    # Check not already taken by another user
+    existing_owner = load_user_by_email(email)
+    if existing_owner is not None and existing_owner.get('id') != user_id:
+        return None, 'This email is already linked to another account.'
+    user = load_user_by_id(user_id)
+    if user is None:
+        return None, 'User not found.'
+    emails = user.setdefault('emails', [])
+    if email not in emails:
+        emails.append(email)
+        save_user(user)
+    return user, ''
+
+
+def link_phone_to_user(user_id: str, phone: str, pin: str) -> tuple[Optional[dict[str, Any]], str]:
+    """Add a phone + PIN to an existing (social) user. Returns (user, error_msg)."""
+    # Check not already taken by another user
+    existing_owner = load_user(phone)
+    if existing_owner is not None and existing_owner.get('id') != user_id:
+        return None, 'This phone number is already linked to another account.'
+    user = load_user_by_id(user_id)
+    if user is None:
+        return None, 'User not found.'
+    user['phone'] = phone
+    user['pinHash'] = _hash_pin(pin)
+    save_user(user)
+    return user, ''
+
+
+(order: dict[str, Any]) -> None:
     """Create or update the user record in data/users/ from a single order."""
     phone = order.get('phone', '').strip()
     if not phone:
@@ -296,12 +396,19 @@ def _migrate_users_from_orders() -> None:
 def list_users() -> list[dict[str, Any]]:
     """Return all users from data/users/, migrating from orders on first call."""
     _migrate_users_from_orders()
+    # Scan all user JSON files (covers phone users, social-only users, and linked users)
+    users_dir = get_users_dir()
+    seen_ids: set[str] = set()
     users = []
-    index = _load_index()
-    for user_id in index.values():
-        path = _user_path_by_id(user_id)
+    for path in users_dir.glob('*.json'):
+        if path.name.startswith('_'):
+            continue
         try:
-            users.append(json.loads(path.read_text(encoding='utf-8')))
+            user = json.loads(path.read_text(encoding='utf-8'))
+            uid = user.get('id', '')
+            if uid and uid not in seen_ids:
+                seen_ids.add(uid)
+                users.append(user)
         except Exception:
             continue
     return sorted(users, key=lambda u: u.get('lastOrderAt', ''), reverse=True)

@@ -17,6 +17,8 @@ from ..data import (
     get_order,
     is_admin_email,
     is_admin_phone,
+    link_email_to_user,
+    link_phone_to_user,
     list_data_files,
     list_orders,
     list_users,
@@ -24,12 +26,14 @@ from ..data import (
     load_locations,
     load_menu,
     load_settings,
+    load_user_by_id,
     read_data_file,
     save_admins,
     save_order,
     save_settings,
     set_user_pin,
     signup_user,
+    social_login_or_create,
     suggested_prep_minutes,
     update_location,
     update_menu_item,
@@ -159,6 +163,63 @@ def admin_reset_pin():
     if not ok:
         return jsonify({'success': False, 'message': 'User not found.'}), 404
     return jsonify({'success': True, 'message': 'PIN cleared. User must set a new PIN on next login.'})
+
+
+# ── Social auth ───────────────────────────────────────────────────────────────
+
+def _public_user(user: dict) -> dict:
+    """Strip sensitive fields before sending to client."""
+    return {k: v for k, v in user.items() if k not in ('pinHash',)}
+
+
+@bp.post('/auth/social')
+def auth_social():
+    """Social login: find or create a user by email. Called after Auth0 popup."""
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get('email', '')).strip().lower()
+    name = str(payload.get('name', '')).strip() or email.split('@')[0] or 'User'
+    picture = str(payload.get('picture', '')).strip()
+    if not email:
+        return jsonify({'error': 'email is required.'}), 400
+    user = social_login_or_create(email, name, picture)
+    pub = _public_user(user)
+    pub['isAdmin'] = is_admin_phone(user.get('phone', '')) or is_admin_email(email)
+    pub['authMethod'] = 'social'
+    return jsonify({'success': True, 'user': pub})
+
+
+@bp.post('/auth/link-email')
+def auth_link_email():
+    """Link a social email to a logged-in user (identified by userId in body)."""
+    payload = request.get_json(silent=True) or {}
+    user_id = str(payload.get('userId', '')).strip()
+    email = str(payload.get('email', '')).strip().lower()
+    if not user_id or not email:
+        return jsonify({'error': 'userId and email are required.'}), 400
+    user, err = link_email_to_user(user_id, email)
+    if err:
+        return jsonify({'success': False, 'message': err}), 409
+    return jsonify({'success': True, 'user': _public_user(user)})
+
+
+@bp.post('/auth/link-phone')
+def auth_link_phone():
+    """Link a phone + PIN to an existing social-only user."""
+    payload = request.get_json(silent=True) or {}
+    user_id = str(payload.get('userId', '')).strip()
+    phone = _clean_phone(str(payload.get('phone', '')))
+    pin = str(payload.get('pin', '')).strip()
+    if not user_id or not phone or not pin:
+        return jsonify({'error': 'userId, phone and pin are required.'}), 400
+    if len(pin) != 4 or not pin.isdigit():
+        return jsonify({'error': 'PIN must be exactly 4 digits.'}), 400
+    user, err = link_phone_to_user(user_id, phone, pin)
+    if err:
+        return jsonify({'success': False, 'message': err}), 409
+    pub = _public_user(user)
+    pub['isAdmin'] = is_admin_phone(phone)
+    pub['authMethod'] = 'phone'
+    return jsonify({'success': True, 'user': pub})
 
 
 @bp.get('/locations')
