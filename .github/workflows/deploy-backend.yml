@@ -12,6 +12,9 @@ permissions:
   id-token: write
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -34,6 +37,12 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Ensure App Service is running
+        run: |
+          RG=$(az webapp show --name halalcart-api --query resourceGroup -o tsv)
+          echo "Resource group: $RG"
+          az webapp start --name halalcart-api --resource-group "$RG" || true
+
       - name: Zip backend for deployment
         run: |
           cd backend
@@ -44,11 +53,18 @@ jobs:
             -x ".env"
 
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: halalcart-api
-          package: backend-deploy.zip
-          startup-command: 'gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 run:app'
+        run: |
+          RG=$(az webapp show --name halalcart-api --query resourceGroup -o tsv)
+          az webapp deploy \
+            --name halalcart-api \
+            --resource-group "$RG" \
+            --src-path backend-deploy.zip \
+            --type zip \
+            --async false
+          az webapp config set \
+            --name halalcart-api \
+            --resource-group "$RG" \
+            --startup-file 'gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 run:app'
 
       - name: Warm up backend
         run: |
