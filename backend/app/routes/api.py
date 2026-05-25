@@ -8,8 +8,10 @@ from ..data import (
     BUILTIN_ADMIN_PHONES,
     add_location,
     add_menu_item,
+    browse_data_dir,
     delete_location,
     delete_menu_item,
+    get_data_dir,
     get_order,
     is_admin_email,
     is_admin_phone,
@@ -256,7 +258,8 @@ def remove_admin():
 def browse_data():
     if not _is_admin():
         return jsonify({'error': 'Admin access required.'}), 403
-    return jsonify(list_data_files())
+    rel_path = request.args.get('path', '').strip()
+    return jsonify(browse_data_dir(rel_path))
 
 
 @bp.get('/admin/data/file')
@@ -270,6 +273,26 @@ def read_data():
     if content is None:
         return jsonify({'error': 'File not found or not readable.'}), 404
     return jsonify({'path': rel_path, 'content': content})
+
+
+@bp.get('/admin/data/download')
+def download_data():
+    import io, zipfile
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    from flask import Response
+    data_dir = get_data_dir().resolve()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for p in sorted(data_dir.rglob('*')):
+            if p.is_file():
+                zf.write(p, p.relative_to(data_dir))
+    buf.seek(0)
+    return Response(
+        buf.read(),
+        mimetype='application/zip',
+        headers={'Content-Disposition': 'attachment; filename=halalcart-data.zip'},
+    )
 
 
 # ── Users route ──────────────────────────────────────────────────────────────

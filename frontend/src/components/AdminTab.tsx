@@ -4,7 +4,8 @@ import {
   AdminsData,
   AdminUser,
   AppSettings,
-  DataFileEntry,
+  DataBrowseResult,
+  DataEntry,
   DayHours,
   MenuItem,
   StoreLocation,
@@ -13,13 +14,14 @@ import {
   addMenuItem,
   adminGetLocations,
   adminGetMenu,
+  dataBrowse,
+  dataDownloadUrl,
   deleteLocation,
   deleteMenuItem,
   getAdminUsers,
   getAdmins,
   getOrders,
   getSettings,
-  listDataFiles,
   Order,
   readDataFile,
   removeAdmin,
@@ -982,81 +984,155 @@ function MenuPanel({ adminUser }: { adminUser: User }) {
 
 // ── Data Browser Panel ────────────────────────────────────────────────────────
 
-function FileBreadcrumb({ path }: { path: string }) {
-  const parts = path.replace(/\\/g, '/').split('/');
-  const allParts = ['data', ...parts];
-  return (
-    <span style={{ fontFamily: 'monospace', fontSize: '0.88rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.1rem' }}>
-      {allParts.map((part, i) => (
-        <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
-          {i > 0 && <span style={{ color: '#d1d5db', margin: '0 0.2rem' }}>›</span>}
-          <span style={{ color: i === allParts.length - 1 ? '#78350f' : '#9ca3af', fontWeight: i === allParts.length - 1 ? 700 : 400 }}>
-            {i === 0 ? '📁 ' : ''}{part}
-          </span>
-        </span>
-      ))}
-    </span>
-  );
-}
-
 function DataPanel({ adminUser }: { adminUser: User }) {
-  const [files, setFiles] = useState<DataFileEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<DataBrowseResult | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [filePath, setFilePath] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
+  const [fileError, setFileError] = useState('');
+  const [copied, setCopied] = useState(false);
 
-  useEffect(() => {
-    setLoading(true);
-    listDataFiles(adminUser)
-      .then(setFiles)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load files.'))
-      .finally(() => setLoading(false));
-  }, [adminUser]);
+  const smallBtn = { background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '0.5rem', padding: '0.35rem 0.7rem', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' as const };
+  const smallOutlineBtn = { background: '#fff', color: '#78350f', border: '1px solid #fed7aa', borderRadius: '0.5rem', padding: '0.35rem 0.7rem', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' as const };
+  const linkBtn = { background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline', fontSize: '0.88rem' } as const;
 
-  const openFile = async (path: string) => {
-    if (selected === path) { setSelected(null); setFileContent(null); return; }
-    setSelected(path); setFileLoading(true); setFileContent(null);
+  const load = async (path: string) => {
+    setLoading(true); setError(''); setFileContent(null); setFilePath('');
     try {
-      const res = await readDataFile(path, adminUser);
-      setFileContent(res.content);
-    } catch { setFileContent('Error reading file.'); }
-    finally { setFileLoading(false); }
+      const res = await dataBrowse(adminUser as unknown as AdminUser, path);
+      if (!res.success) setError(res.message || 'Could not browse.');
+      else setData(res);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Error'); }
+    setLoading(false);
   };
 
-  const fmt = (bytes: number) =>
-    bytes < 1024 ? `${bytes} B` : bytes < 1_048_576 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`;
+  useEffect(() => { load(''); }, []);
+
+  const openFile = async (entry: DataEntry) => {
+    setFileLoading(true); setFileError(''); setFileContent(null); setFilePath(entry.path); setCopied(false);
+    try {
+      const res = await readDataFile(entry.path, adminUser as unknown as AdminUser);
+      setFileContent(res.content);
+    } catch (e) { setFileError(e instanceof Error ? e.message : 'Error reading file.'); }
+    setFileLoading(false);
+  };
+
+  const handleCopy = () => {
+    if (!fileContent) return;
+    navigator.clipboard.writeText(fileContent).then(() => {
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const segments = data?.currentPath ? data.currentPath.split('/').filter(Boolean) : [];
+  const crumbPaths = segments.map((_, i) => segments.slice(0, i + 1).join('/'));
+
+  const fmtSize = (bytes: number | null) => {
+    if (bytes === null) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1_048_576).toFixed(2)} MB`;
+  };
 
   return (
-    <div style={{ display: 'grid', gap: '0.75rem' }}>
-      <p style={mutedText}>Browse files in the data directory.</p>
-      {loading && <div style={S.card}>Loading files…</div>}
-      {error   && <div style={{ ...S.card, ...S.errorBox }}>{error}</div>}
-      {!loading && !error && !files.length && <div style={{ ...S.card, background: '#fffaf0' }}>No files found.</div>}
-      {files.map((f) => (
-        <div key={f.path} style={{ border: '1px solid #fed7aa', borderRadius: '0.8rem', background: '#fffbeb', overflow: 'hidden' }}>
-          <button
-            type="button"
-            onClick={() => openFile(f.path)}
-            style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', textAlign: 'left' }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>{selected === f.path ? '▼' : '▶'}</span>
-              <FileBreadcrumb path={f.path} />
-            </span>
-            <span style={{ color: '#9ca3af', fontSize: '0.8rem', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(f.size)}</span>
-          </button>
-          {selected === f.path && (
-            <div style={{ borderTop: '1px solid #fed7aa', padding: '0.75rem 1rem' }}>
-              {fileLoading
-                ? <span style={mutedText}>Loading…</span>
-                : <pre style={{ margin: 0, fontSize: '0.78rem', color: '#374151', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 400, overflowY: 'auto' }}>{fileContent}</pre>
-              }
+    <div style={{ display: 'grid', gap: '0.9rem' }}>
+      {/* Dark data dir banner */}
+      <div style={{ background: '#1e293b', borderRadius: '0.75rem', padding: '0.65rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '0.05em' }}>DATA DIR</span>
+        <code style={{ color: '#a3e635', fontSize: '0.82rem', wordBreak: 'break-all', flex: 1 }}>{data?.dataDir ?? '…'}</code>
+        <a
+          href={dataDownloadUrl(adminUser as unknown as AdminUser)}
+          download="halalcart-data.zip"
+          style={{ ...smallBtn, textDecoration: 'none' }}
+        >⬇ Download all</a>
+      </div>
+
+      {/* Breadcrumb */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap', fontSize: '0.88rem' }}>
+        <button style={{ ...linkBtn, fontWeight: 700, color: '#f59e0b' }} onClick={() => load('')}>root</button>
+        {segments.map((seg, i) => (
+          <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <span style={{ color: '#d1d5db' }}>/</span>
+            <button
+              style={{ ...linkBtn, color: i === segments.length - 1 ? '#78350f' : '#f59e0b', fontWeight: i === segments.length - 1 ? 700 : 400 }}
+              onClick={() => load(crumbPaths[i])}
+            >{seg}</button>
+          </span>
+        ))}
+      </div>
+
+      {error && <div style={S.errorBox}>{error}</div>}
+
+      {/* File / directory listing table */}
+      <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+        {loading ? (
+          <p style={{ ...mutedText, padding: '1rem' }}>Loading…</p>
+        ) : !data || data.entries.length === 0 ? (
+          <p style={{ ...mutedText, padding: '1rem' }}>Empty directory.</p>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+            <thead>
+              <tr style={{ background: '#fffbeb', borderBottom: '2px solid #fde68a' }}>
+                <th style={{ textAlign: 'left', padding: '0.55rem 1rem', color: '#92400e', fontWeight: 700 }}>Name</th>
+                <th style={{ textAlign: 'right', padding: '0.55rem 0.75rem', color: '#92400e', fontWeight: 700, whiteSpace: 'nowrap' }}>Size</th>
+                <th style={{ textAlign: 'right', padding: '0.55rem 1rem', color: '#92400e', fontWeight: 700, whiteSpace: 'nowrap' }}>Modified</th>
+              </tr>
+            </thead>
+            <tbody>
+              {/* Parent dir (..) */}
+              {data.currentPath && (
+                <tr
+                  style={{ borderBottom: '1px solid #f3f4f6', cursor: 'pointer' }}
+                  onClick={() => load(crumbPaths.length > 1 ? crumbPaths[crumbPaths.length - 2] : '')}
+                >
+                  <td style={{ padding: '0.5rem 1rem', color: '#f59e0b', fontWeight: 600 }}>📁 ..</td>
+                  <td /><td />
+                </tr>
+              )}
+              {data.entries.map((entry, i) => (
+                <tr
+                  key={entry.path}
+                  style={{ borderBottom: '1px solid #f3f4f6', background: i % 2 === 0 ? '#fff' : '#fffbeb', cursor: 'pointer' }}
+                  onClick={() => entry.type === 'dir' ? load(entry.path) : openFile(entry)}
+                >
+                  <td style={{ padding: '0.5rem 1rem', color: entry.type === 'dir' ? '#2563eb' : '#374151' }}>
+                    {entry.type === 'dir' ? '📁 ' : '📄 '}{entry.name}
+                  </td>
+                  <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', ...mutedText }}>{fmtSize(entry.size)}</td>
+                  <td style={{ padding: '0.5rem 1rem', textAlign: 'right', ...mutedText, fontSize: '0.76rem' }}>
+                    {new Date(entry.modified * 1000).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* File viewer */}
+      {(filePath || fileLoading) && (
+        <div style={{ ...S.card, display: 'grid', gap: '0.65rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <h3 style={{ margin: 0, fontWeight: 700, color: '#78350f', fontSize: '0.95rem' }}>📄 {filePath.split('/').pop()}</h3>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {fileContent !== null && (
+                <button style={smallBtn} onClick={handleCopy}>{copied ? '✓ Copied!' : '📋 Copy'}</button>
+              )}
+              <button style={smallOutlineBtn} onClick={() => { setFileContent(null); setFilePath(''); }}>✕ Close</button>
             </div>
+          </div>
+          <code style={{ ...mutedText, fontSize: '0.7rem' }}>{filePath}</code>
+          {fileLoading && <p style={mutedText}>Loading…</p>}
+          {fileError && <div style={S.errorBox}>{fileError}</div>}
+          {fileContent !== null && (
+            <pre style={{ background: '#0f172a', color: '#a3e635', borderRadius: '0.75rem', padding: '1rem', fontSize: '0.78rem', overflowX: 'auto', maxHeight: 500, overflowY: 'auto', margin: 0, lineHeight: 1.5 }}>
+              {fileContent}
+            </pre>
           )}
         </div>
-      ))}
+      )}
     </div>
   );
 }

@@ -152,8 +152,44 @@ def is_admin_email(email: str) -> bool:
 
 # ── Data folder browser ──────────────────────────────────────────────────────
 
+def browse_data_dir(rel_path: str = '') -> dict[str, Any]:
+    """Browse a directory within the data dir. Returns entries with type, size, modified."""
+    import time
+    data_dir = get_data_dir().resolve()
+    try:
+        target = (data_dir / rel_path).resolve() if rel_path else data_dir
+        target.relative_to(data_dir)  # safety check
+    except (ValueError, Exception):
+        return {'success': False, 'message': 'Invalid path.'}
+    if not target.exists() or not target.is_dir():
+        return {'success': False, 'message': 'Path not found.'}
+
+    entries: list[dict[str, Any]] = []
+    for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        try:
+            stat = p.stat()
+            rel = str(p.relative_to(data_dir))
+            entries.append({
+                'name': p.name,
+                'path': rel,
+                'type': 'file' if p.is_file() else 'dir',
+                'size': stat.st_size if p.is_file() else None,
+                'modified': stat.st_mtime,
+            })
+        except Exception:
+            continue
+
+    current = str(target.relative_to(data_dir)) if target != data_dir else ''
+    return {
+        'success': True,
+        'dataDir': str(data_dir),
+        'currentPath': current,
+        'entries': entries,
+    }
+
+
 def list_data_files() -> list[dict[str, Any]]:
-    """List all files under the data directory (relative paths)."""
+    """List all files under the data directory (relative paths). Legacy flat list."""
     data_dir = get_data_dir()
     result: list[dict[str, Any]] = []
     if not data_dir.exists():

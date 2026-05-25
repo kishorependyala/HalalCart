@@ -155,8 +155,29 @@ export const removeAdmin = (
 
 export type DataFileEntry = { path: string; size: number };
 
-export const listDataFiles = (adminUser: { phone: string; email?: string; authMethod?: string }) =>
-  fetch(`${BASE}/api/admin/data`, { headers: adminHeaders(adminUser) }).then((r) => parseResponse<DataFileEntry[]>(r));
+export type DataEntry = {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size: number | null;
+  modified: number;
+};
+
+export type DataBrowseResult = {
+  success: boolean;
+  message?: string;
+  dataDir: string;
+  currentPath: string;
+  entries: DataEntry[];
+};
+
+export const dataBrowse = (
+  adminUser: { phone: string; email?: string; authMethod?: string },
+  path = ''
+) =>
+  fetch(`${BASE}/api/admin/data${path ? `?path=${encodeURIComponent(path)}` : ''}`, {
+    headers: adminHeaders(adminUser),
+  }).then((r) => parseResponse<DataBrowseResult>(r));
 
 export const readDataFile = (
   path: string,
@@ -165,6 +186,13 @@ export const readDataFile = (
   fetch(`${BASE}/api/admin/data/file?path=${encodeURIComponent(path)}`, { headers: adminHeaders(adminUser) }).then(
     (r) => parseResponse<{ path: string; content: string }>(r)
   );
+
+export const dataDownloadUrl = (adminUser: { phone: string; email?: string; authMethod?: string }) => {
+  const params = new URLSearchParams();
+  if (adminUser.phone) params.set('phone', adminUser.phone);
+  if (adminUser.email) params.set('email', adminUser.email);
+  return `${BASE}/api/admin/data/download?${params.toString()}`;
+};
 
 // ── Menu management ───────────────────────────────────────────────────────────
 
