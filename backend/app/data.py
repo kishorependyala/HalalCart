@@ -325,7 +325,7 @@ def link_phone_to_user(user_id: str, phone: str, pin: str) -> tuple[Optional[dic
     return user, ''
 
 
-(order: dict[str, Any]) -> None:
+def upsert_user_from_order(order: dict[str, Any]) -> None:
     """Create or update the user record in data/users/ from a single order."""
     phone = order.get('phone', '').strip()
     if not phone:
