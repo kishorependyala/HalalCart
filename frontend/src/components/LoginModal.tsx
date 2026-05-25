@@ -165,12 +165,13 @@ export default function LoginModal({ onLogin, onClose }: Props) {
             <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
           </div>
 
-          <div style={{ display: 'grid', gap: '0.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.4rem' }}>
             {SOCIAL_PROVIDERS.map(({ connection, label, icon, bg, color, border }) => (
               <button key={connection} type="button" disabled={loading !== null} onClick={() => handleSocial(connection)}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', background: bg, color, border: `1.5px solid ${border}`, borderRadius: '0.75rem', padding: '0.6rem 1rem', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', opacity: loading !== null && loading !== connection ? 0.5 : 1 }}>
-                <span>{icon}</span>
-                <span>{loading === connection ? 'Signing in…' : `Continue with ${label}`}</span>
+                title={label}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.2rem', background: bg, color, border: `1.5px solid ${border}`, borderRadius: '0.75rem', padding: '0.5rem 0.25rem', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', opacity: loading !== null && loading !== connection ? 0.5 : 1, minWidth: 0 }}>
+                <span style={{ fontSize: '1.3rem', lineHeight: 1 }}>{loading === connection ? '…' : icon}</span>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', padding: '0 2px' }}>{label}</span>
               </button>
             ))}
           </div>
