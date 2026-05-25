@@ -9,6 +9,8 @@ from ..data import (
     add_location,
     add_menu_item,
     browse_data_dir,
+    check_phone_exists,
+    clear_user_pin,
     delete_location,
     delete_menu_item,
     get_data_dir,
@@ -26,10 +28,13 @@ from ..data import (
     save_admins,
     save_order,
     save_settings,
+    set_user_pin,
+    signup_user,
     suggested_prep_minutes,
     update_location,
     update_menu_item,
     update_order,
+    verify_pin,
 )
 
 bp = Blueprint('api', __name__)
@@ -56,6 +61,7 @@ def _is_admin() -> bool:
 
 @bp.post('/login')
 def login():
+    """Legacy endpoint kept for social-login users."""
     payload = request.get_json(silent=True) or {}
     name = str(payload.get('name', '')).strip()
     phone = str(payload.get('phone', '')).replace(' ', '').replace('-', '').replace('(', '').replace(')', '').strip()
@@ -67,6 +73,92 @@ def login():
     if email:
         resp['email'] = email
     return jsonify(resp)
+
+
+# ── Phone + PIN auth ─────────────────────────────────────────────────────────
+
+def _clean_phone(raw: str) -> str:
+    digits = ''.join(c for c in raw if c.isdigit())
+    return digits[-10:] if len(digits) > 10 else digits
+
+
+@bp.post('/auth/check-phone')
+def auth_check_phone():
+    payload = request.get_json(silent=True) or {}
+    phone = _clean_phone(str(payload.get('phone', '')))
+    if len(phone) < 10:
+        return jsonify({'error': 'Valid 10-digit phone required.'}), 400
+    result = check_phone_exists(phone)
+    return jsonify(result)
+
+
+@bp.post('/auth/login')
+def auth_login():
+    payload = request.get_json(silent=True) or {}
+    phone = _clean_phone(str(payload.get('phone', '')))
+    pin = str(payload.get('pin', '')).strip()
+    if not phone or not pin:
+        return jsonify({'error': 'Phone and PIN are required.'}), 400
+    user = verify_pin(phone, pin)
+    if user is None:
+        return jsonify({'success': False, 'message': 'Incorrect PIN. Please try again.'}), 401
+    public = {k: v for k, v in user.items() if k != 'pinHash'}
+    public['isAdmin'] = is_admin_phone(phone)
+    public['authMethod'] = 'phone'
+    return jsonify({'success': True, 'user': public})
+
+
+@bp.post('/auth/signup')
+def auth_signup():
+    payload = request.get_json(silent=True) or {}
+    phone = _clean_phone(str(payload.get('phone', '')))
+    name = str(payload.get('name', '')).strip()
+    pin = str(payload.get('pin', '')).strip()
+    if not phone or not name or not pin:
+        return jsonify({'error': 'Phone, name and PIN are required.'}), 400
+    if len(pin) != 4 or not pin.isdigit():
+        return jsonify({'error': 'PIN must be exactly 4 digits.'}), 400
+    try:
+        user = signup_user(phone, name, pin)
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 409
+    public = {k: v for k, v in user.items() if k != 'pinHash'}
+    public['isAdmin'] = is_admin_phone(phone)
+    public['authMethod'] = 'phone'
+    return jsonify({'success': True, 'user': public}), 201
+
+
+@bp.post('/auth/set-pin')
+def auth_set_pin():
+    """Set PIN for an existing user who doesn't have one yet (first-time)."""
+    payload = request.get_json(silent=True) or {}
+    phone = _clean_phone(str(payload.get('phone', '')))
+    pin = str(payload.get('pin', '')).strip()
+    if not phone or not pin:
+        return jsonify({'error': 'Phone and PIN are required.'}), 400
+    if len(pin) != 4 or not pin.isdigit():
+        return jsonify({'error': 'PIN must be exactly 4 digits.'}), 400
+    user = set_user_pin(phone, pin)
+    if user is None:
+        return jsonify({'success': False, 'message': 'Phone not found.'}), 404
+    public = {k: v for k, v in user.items() if k != 'pinHash'}
+    public['isAdmin'] = is_admin_phone(phone)
+    public['authMethod'] = 'phone'
+    return jsonify({'success': True, 'user': public})
+
+
+@bp.post('/admin/users/reset-pin')
+def admin_reset_pin():
+    if not _is_admin():
+        return jsonify({'error': 'Admin access required.'}), 403
+    payload = request.get_json(silent=True) or {}
+    phone = _clean_phone(str(payload.get('phone', '')))
+    if not phone:
+        return jsonify({'error': 'phone required.'}), 400
+    ok = clear_user_pin(phone)
+    if not ok:
+        return jsonify({'success': False, 'message': 'User not found.'}), 404
+    return jsonify({'success': True, 'message': 'PIN cleared. User must set a new PIN on next login.'})
 
 
 @bp.get('/locations')

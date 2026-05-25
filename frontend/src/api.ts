@@ -73,6 +73,46 @@ export const loginUser = (name: string, phone: string) =>
     body: JSON.stringify({ name, phone }),
   }).then((r) => parseResponse<User>(r));
 
+// ── Phone + PIN auth ──────────────────────────────────────────────────────────
+
+export const checkPhone = (phone: string) =>
+  fetch(`${BASE}/api/auth/check-phone`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone }),
+  }).then((r) => parseResponse<{ exists: boolean; hasPin: boolean }>(r));
+
+export const loginWithPin = (phone: string, pin: string) =>
+  fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, pin }),
+  }).then((r) => r.json() as Promise<{ success: boolean; user?: User; message?: string }>);
+
+export const signupUser = (phone: string, name: string, pin: string) =>
+  fetch(`${BASE}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, name, pin }),
+  }).then((r) => r.json() as Promise<{ success: boolean; user?: User; message?: string }>);
+
+export const setPinUser = (phone: string, pin: string) =>
+  fetch(`${BASE}/api/auth/set-pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, pin }),
+  }).then((r) => r.json() as Promise<{ success: boolean; user?: User; message?: string }>);
+
+export const adminResetPin = (
+  phone: string,
+  adminUser: { phone: string; email?: string; authMethod?: string }
+) =>
+  fetch(`${BASE}/api/admin/users/reset-pin`, {
+    method: 'POST',
+    headers: { ...adminHeaders(adminUser), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone }),
+  }).then((r) => parseResponse<{ success: boolean; message: string }>(r));
+
 export const getMenu = () => fetch(`${BASE}/api/menu`).then((r) => parseResponse<MenuItem[]>(r));
 
 export const getOrders = (phone?: string) => {

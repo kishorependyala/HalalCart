@@ -14,6 +14,7 @@ import {
   addMenuItem,
   adminGetLocations,
   adminGetMenu,
+  adminResetPin,
   dataBrowse,
   dataDownloadUrl,
   deleteLocation,
@@ -119,6 +120,8 @@ function UsersPanel({ adminUser, onViewAsUser }: { adminUser: User; onViewAsUser
   const [expandedPhone, setExpandedPhone] = useState<string | null>(null);
   const [userOrders, setUserOrders] = useState<Record<string, Order[]>>({});
   const [ordersLoading, setOrdersLoading] = useState<Record<string, boolean>>({});
+  const [pinResetMsg, setPinResetMsg] = useState<Record<string, string>>({});
+  const [pinResetting, setPinResetting] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLoading(true); setError('');
@@ -173,14 +176,34 @@ function UsersPanel({ adminUser, onViewAsUser }: { adminUser: User; onViewAsUser
             <span style={{ color: '#9ca3af', fontSize: '0.7rem' }}>{expandedPhone === u.phone ? '▲' : '▼'}</span>
           </button>
 
-          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.75rem', justifyContent: 'flex-end', borderTop: '1px solid #fde68a', background: '#fffef5' }}>
+          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.75rem', justifyContent: 'flex-end', borderTop: '1px solid #fde68a', background: '#fffef5', flexWrap: 'wrap' as const }}>
             <button
               type="button"
               onClick={() => onViewAsUser({ name: u.name, phone: u.phone, isAdmin: false })}
-              style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 999, padding: '0.3rem 0.85rem', fontSize: '0.78rem', fontWeight: 700, color: '#92400e', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+              style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 999, padding: '0.3rem 0.85rem', fontSize: '0.78rem', fontWeight: 700, color: '#92400e', cursor: 'pointer' }}
             >
               👁 View as this user
             </button>
+            <button
+              type="button"
+              disabled={pinResetting[u.phone]}
+              onClick={async () => {
+                if (!window.confirm(`Clear PIN for ${u.name} (${u.phone})? They will set a new one on next login.`)) return;
+                setPinResetting((s) => ({ ...s, [u.phone]: true }));
+                try {
+                  const res = await adminResetPin(u.phone, adminUser as unknown as AdminUser);
+                  setPinResetMsg((s) => ({ ...s, [u.phone]: res.success ? '✓ PIN cleared' : (res.message ?? 'Error') }));
+                } catch { setPinResetMsg((s) => ({ ...s, [u.phone]: 'Error' })); }
+                setPinResetting((s) => ({ ...s, [u.phone]: false }));
+                setTimeout(() => setPinResetMsg((s) => { const n = { ...s }; delete n[u.phone]; return n; }), 3000);
+              }}
+              style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 999, padding: '0.3rem 0.85rem', fontSize: '0.78rem', fontWeight: 700, color: '#dc2626', cursor: 'pointer' }}
+            >
+              {pinResetting[u.phone] ? '…' : '🔑 Reset PIN'}
+            </button>
+            {pinResetMsg[u.phone] && (
+              <span style={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 700 }}>{pinResetMsg[u.phone]}</span>
+            )}
           </div>
 
           {expandedPhone === u.phone && (

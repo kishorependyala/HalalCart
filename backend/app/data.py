@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -119,6 +120,71 @@ def save_user(user: dict[str, Any]) -> dict[str, Any]:
     index[user['phone']] = user_id
     _save_index(index)
     return user
+
+
+# ── PIN auth helpers ─────────────────────────────────────────────────────────
+
+def _hash_pin(pin: str) -> str:
+    return hashlib.sha256(pin.strip().encode()).hexdigest()
+
+
+def check_phone_exists(phone: str) -> dict[str, Any]:
+    """Return {exists, hasPin} for the given phone."""
+    user = load_user(phone)
+    if user is None:
+        return {'exists': False, 'hasPin': False}
+    return {'exists': True, 'hasPin': bool(user.get('pinHash'))}
+
+
+def verify_pin(phone: str, pin: str) -> Optional[dict[str, Any]]:
+    """Return the user dict if PIN matches, else None."""
+    user = load_user(phone)
+    if user is None:
+        return None
+    stored = user.get('pinHash', '')
+    if not stored or stored != _hash_pin(pin):
+        return None
+    return user
+
+
+def set_user_pin(phone: str, pin: str) -> Optional[dict[str, Any]]:
+    """Set (or update) the PIN for an existing user. Returns updated user or None."""
+    user = load_user(phone)
+    if user is None:
+        return None
+    user['pinHash'] = _hash_pin(pin)
+    return save_user(user)
+
+
+def clear_user_pin(phone: str) -> bool:
+    """Clear PIN (admin reset). User will be prompted to set a new one on next login."""
+    user = load_user(phone)
+    if user is None:
+        return False
+    user.pop('pinHash', None)
+    save_user(user)
+    return True
+
+
+def signup_user(phone: str, name: str, pin: str) -> dict[str, Any]:
+    """Create a new user with a PIN. Raises ValueError if phone already exists."""
+    if load_user(phone) is not None:
+        raise ValueError('Phone already registered.')
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    date_prefix = datetime.now().strftime('%Y%m%d')
+    new_id = _next_user_id(date_prefix)
+    user: dict[str, Any] = {
+        'id': new_id,
+        'phone': phone,
+        'name': name,
+        'pinHash': _hash_pin(pin),
+        'createdAt': now,
+        'lastOrderAt': '',
+        'orderCount': 0,
+        'totalSpent': 0.0,
+    }
+    return save_user(user)
 
 
 def upsert_user_from_order(order: dict[str, Any]) -> None:

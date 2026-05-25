@@ -1,84 +1,127 @@
 import { useAuth0 } from '@auth0/auth0-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { loginUser, User } from '../api';
-import { S } from '../theme';
+import { checkPhone, loginWithPin, setPinUser, signupUser, User } from '../api';
+import { S, mutedText } from '../theme';
 
-type Props = {
-  onLogin: (user: User) => void;
-  onClose: () => void;
-  adminEmail?: string;
-};
+type AuthStep = 'phone' | 'pin' | 'set-pin' | 'signup-name' | 'signup-pin' | 'forgot';
 
-// Social provider button configs
-const SOCIAL_PROVIDERS: Array<{
-  connection: string;
-  label: string;
-  icon: string;
-  bg: string;
-  color: string;
-  border: string;
-}> = [
-  { connection: 'google-oauth2', label: 'Google',    icon: '🔵', bg: '#fff',     color: '#3c4043', border: '#dadce0' },
-  { connection: 'apple',         label: 'Apple',     icon: '🍎', bg: '#000',     color: '#fff',    border: '#000' },
-  { connection: 'facebook',      label: 'Facebook',  icon: '📘', bg: '#1877f2',  color: '#fff',    border: '#1877f2' },
-  { connection: 'discord',       label: 'Discord',   icon: '🎮', bg: '#5865f2',  color: '#fff',    border: '#5865f2' },
-  { connection: 'twitter',       label: 'Twitter / X', icon: '🐦', bg: '#000',   color: '#fff',    border: '#000' },
-  { connection: 'snap',          label: 'Snapchat',  icon: '👻', bg: '#fffc00',  color: '#000',    border: '#fffc00' },
-  { connection: 'windowslive',   label: 'Microsoft', icon: '🎮', bg: '#00a4ef',  color: '#fff',    border: '#00a4ef' },
+const SOCIAL_PROVIDERS = [
+  { connection: 'google-oauth2', label: 'Google',   icon: '🔵', bg: '#fff',    color: '#3c4043', border: '#dadce0' },
+  { connection: 'apple',         label: 'Apple',    icon: '🍎', bg: '#000',    color: '#fff',    border: '#000' },
+  { connection: 'facebook',      label: 'Facebook', icon: '📘', bg: '#1877f2', color: '#fff',    border: '#1877f2' },
 ];
+
+type Props = { onLogin: (user: User) => void; onClose: () => void };
 
 export default function LoginModal({ onLogin, onClose }: Props) {
   const { loginWithPopup, user: auth0User, isAuthenticated } = useAuth0();
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState<string | null>(null); // stores which provider is loading
-  const [error, setError] = useState('');
-  const [showPhoneForm, setShowPhoneForm] = useState(false);
 
-  const handleSocial = async (connection: string) => {
-    setError('');
-    setLoading(connection);
+  const [step, setStep] = useState<AuthStep>('phone');
+  const [phone, setPhone] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinConfirm, setPinConfirm] = useState('');
+  const [name, setName] = useState('');
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, [step]);
+
+  if (isAuthenticated && auth0User) { onClose(); return null; }
+
+  const cleanPhone = (raw: string) => { const d = raw.replace(/\D/g, ''); return d.length > 10 ? d.slice(-10) : d; };
+  const goBack = (to: AuthStep) => { setStep(to); setError(''); setPin(''); setPinConfirm(''); };
+
+  const handlePhoneContinue = async () => {
+    const p = cleanPhone(phone);
+    if (p.length < 10) { setError('Enter a valid 10-digit phone number.'); return; }
+    setError(''); setLoading('phone');
     try {
-      await loginWithPopup({ authorizationParams: { connection } });
-      // auth0User is updated after loginWithPopup resolves
-      // We read it fresh from the hook on next render via useEffect in App, but
-      // here we call onLogin directly once Auth0 confirms success.
-    } catch (err: any) {
-      if (err?.error !== 'popup_closed_by_user') {
-        setError('Sign-in failed. Please try again.');
-      }
-    } finally {
-      setLoading(null);
-    }
+      const res = await checkPhone(p);
+      setPhone(p);
+      if (!res.exists) setStep('signup-name');
+      else if (!res.hasPin) setStep('set-pin');
+      else setStep('pin');
+    } catch { setError('Could not reach server. Please try again.'); }
+    setLoading(null);
   };
 
-  // After a successful social login, auth0User will be populated — close modal
-  if (isAuthenticated && auth0User) {
-    // Let App.tsx handle mapping via useEffect; just close
-    onClose();
-    return null;
-  }
-
-  const submitPhone = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    if (!name.trim() || !phone.trim()) {
-      setError('Please enter your name and phone number.');
-      return;
-    }
-    setLoading('phone');
+  const handlePinLogin = async () => {
+    if (pin.length !== 4) { setError('PIN must be 4 digits.'); return; }
+    setError(''); setLoading('pin');
     try {
-      const user = await loginUser(name.trim(), phone.trim());
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-      onLogin({ ...user, authMethod: 'phone' });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed.');
-    } finally {
-      setLoading(null);
-    }
+      const res = await loginWithPin(phone, pin);
+      if (res.success && res.user) onLogin({ ...res.user, authMethod: 'phone' });
+      else setError(res.message || 'Incorrect PIN.');
+    } catch { setError('Could not reach server.'); }
+    setLoading(null);
+  };
+
+  const handleSetPin = async () => {
+    if (pin.length !== 4) { setError('PIN must be 4 digits.'); return; }
+    if (pin !== pinConfirm) { setError('PINs do not match.'); return; }
+    setError(''); setLoading('set-pin');
+    try {
+      const res = await setPinUser(phone, pin);
+      if (res.success && res.user) onLogin({ ...res.user, authMethod: 'phone' });
+      else setError(res.message || 'Could not set PIN.');
+    } catch { setError('Could not reach server.'); }
+    setLoading(null);
+  };
+
+  const handleSignup = async () => {
+    if (pin.length !== 4) { setError('PIN must be 4 digits.'); return; }
+    if (pin !== pinConfirm) { setError('PINs do not match.'); return; }
+    setError(''); setLoading('signup');
+    try {
+      const res = await signupUser(phone, name, pin);
+      if (res.success && res.user) onLogin({ ...res.user, authMethod: 'phone' });
+      else setError(res.message || 'Signup failed.');
+    } catch { setError('Could not reach server.'); }
+    setLoading(null);
+  };
+
+  const handleSocial = async (connection: string) => {
+    setError(''); setLoading(connection);
+    try { await loginWithPopup({ authorizationParams: { connection } }); }
+    catch (e: any) { if (e?.error !== 'popup_closed_by_user') setError('Sign-in failed. Please try again.'); }
+    setLoading(null);
+  };
+
+  const pinField = (value: string, onChange: (v: string) => void, onEnter: (() => void) | undefined, label: string) => (
+    <div>
+      <label style={S.label}>{label}</label>
+      <input
+        ref={inputRef}
+        type="password"
+        inputMode="numeric"
+        maxLength={4}
+        placeholder="••••"
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
+        onKeyDown={(e) => e.key === 'Enter' && onEnter?.()}
+        style={{ ...S.inp, letterSpacing: '0.4em', fontSize: '1.4rem', textAlign: 'center' }}
+      />
+    </div>
+  );
+
+  const backLink = (to: AuthStep, label = '← Back') => (
+    <div style={{ textAlign: 'center' }}>
+      <button type="button" onClick={() => goBack(to)}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '0.85rem', textDecoration: 'underline' }}>
+        {label}
+      </button>
+    </div>
+  );
+
+  const stepLabel: Record<AuthStep, string> = {
+    'phone':       'Sign in or create an account',
+    'pin':         'Welcome back! Enter your PIN.',
+    'set-pin':     'Set a PIN for future logins.',
+    'signup-name': 'Create your account',
+    'signup-pin':  'Choose a 4-digit PIN',
+    'forgot':      'Reset your PIN',
   };
 
   return (
@@ -86,76 +129,119 @@ export default function LoginModal({ onLogin, onClose }: Props) {
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{ background: '#fff', borderRadius: '1.2rem', padding: '2rem', width: '100%', maxWidth: 400, boxShadow: '0 8px 40px rgba(120,53,15,0.18)', maxHeight: '90vh', overflowY: 'auto' }}>
-        <h2 style={{ margin: '0 0 0.25rem', color: '#78350f', fontWeight: 900, fontSize: '1.3rem' }}>
-          🥩 Sign In
-        </h2>
-        <p style={{ margin: '0 0 1.4rem', color: '#92400e', fontSize: '0.88rem' }}>
-          Sign in to place orders and get pickup notifications.
-        </p>
+      <div style={{ background: '#fff', borderRadius: '1.25rem', padding: '2rem', width: '100%', maxWidth: 380, boxShadow: '0 8px 40px rgba(120,53,15,0.18)', maxHeight: '92vh', overflowY: 'auto', display: 'grid', gap: '1rem' }}>
 
-        {error ? <div style={{ ...S.errorBox, marginBottom: '1rem' }}>{error}</div> : null}
-
-        {/* Social login buttons */}
-        <div style={{ display: 'grid', gap: '0.6rem', marginBottom: '1.25rem' }}>
-          {SOCIAL_PROVIDERS.map(({ connection, label, icon, bg, color, border }) => (
-            <button
-              key={connection}
-              type="button"
-              disabled={loading !== null}
-              onClick={() => handleSocial(connection)}
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem',
-                background: bg, color, border: `1.5px solid ${border}`,
-                borderRadius: '0.75rem', padding: '0.65rem 1rem', fontSize: '0.92rem', fontWeight: 600,
-                cursor: loading !== null ? 'not-allowed' : 'pointer',
-                opacity: loading !== null && loading !== connection ? 0.55 : 1,
-                transition: 'opacity 0.15s',
-              }}
-            >
-              <span>{icon}</span>
-              <span>{loading === connection ? 'Signing in…' : `Continue with ${label}`}</span>
-            </button>
-          ))}
+        {/* Header */}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '2.4rem', marginBottom: '0.2rem' }}>🥩</div>
+          <h2 style={{ margin: 0, color: '#78350f', fontWeight: 900, fontSize: '1.25rem' }}>Halal Meat Market</h2>
+          <p style={{ ...mutedText, marginTop: '0.25rem' }}>{stepLabel[step]}</p>
         </div>
 
-        {/* Divider */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.1rem' }}>
-          <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
-          <span style={{ color: '#92400e', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
-            or use phone number
-          </span>
-          <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
-        </div>
+        {error && <div style={S.errorBox}>{error}</div>}
 
-        {/* Phone form (collapsible) */}
-        {showPhoneForm ? (
-          <form onSubmit={submitPhone} style={{ display: 'grid', gap: '0.9rem' }}>
-            <div>
-              <label htmlFor="login-name" style={S.label}>Your Name</label>
-              <input id="login-name" value={name} onChange={(e) => setName(e.target.value)} style={S.inp} placeholder="Full name" autoFocus />
-            </div>
-            <div>
-              <label htmlFor="login-phone" style={S.label}>Phone Number</label>
-              <input id="login-phone" value={phone} onChange={(e) => setPhone(e.target.value)} style={S.inp} placeholder="e.g. 7321234567" type="tel" />
-            </div>
-            <button type="submit" disabled={loading === 'phone'} style={{ ...S.primaryBtn, opacity: loading === 'phone' ? 0.7 : 1 }}>
-              {loading === 'phone' ? 'Signing in…' : 'Sign In with Phone'}
-            </button>
-            <button type="button" onClick={() => setShowPhoneForm(false)} style={{ ...S.outlineBtn, textAlign: 'center' }}>
-              ← Back
-            </button>
-          </form>
-        ) : (
-          <div style={{ display: 'grid', gap: '0.6rem' }}>
-            <button type="button" onClick={() => setShowPhoneForm(true)} style={{ ...S.outlineBtn, textAlign: 'center' }}>
-              📱 Continue with Phone Number
-            </button>
-            <button type="button" onClick={onClose} style={{ color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', padding: '0.4rem' }}>
-              Cancel
+        {/* Phone entry */}
+        {step === 'phone' && (<>
+          <div>
+            <label style={S.label}>Phone Number</label>
+            <input
+              ref={inputRef} type="tel" inputMode="numeric" placeholder="10-digit number"
+              value={phone} onChange={(e) => { setPhone(e.target.value); setError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && handlePhoneContinue()}
+              style={S.inp} autoComplete="tel"
+            />
+          </div>
+          <button onClick={handlePhoneContinue} style={S.primaryBtn} disabled={loading !== null}>
+            {loading === 'phone' ? 'Checking…' : 'Continue →'}
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
+            <span style={{ color: '#92400e', fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap' }}>or sign in with</span>
+            <div style={{ flex: 1, height: 1, background: '#fde68a' }} />
+          </div>
+
+          <div style={{ display: 'grid', gap: '0.5rem' }}>
+            {SOCIAL_PROVIDERS.map(({ connection, label, icon, bg, color, border }) => (
+              <button key={connection} type="button" disabled={loading !== null} onClick={() => handleSocial(connection)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem', background: bg, color, border: `1.5px solid ${border}`, borderRadius: '0.75rem', padding: '0.6rem 1rem', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', opacity: loading !== null && loading !== connection ? 0.5 : 1 }}>
+                <span>{icon}</span>
+                <span>{loading === connection ? 'Signing in…' : `Continue with ${label}`}</span>
+              </button>
+            ))}
+          </div>
+
+          <button type="button" onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '0.82rem', textAlign: 'center' }}>
+            Cancel
+          </button>
+        </>)}
+
+        {/* PIN login */}
+        {step === 'pin' && (<>
+          <p style={{ ...mutedText, textAlign: 'center', margin: 0 }}>📱 {phone}</p>
+          {pinField(pin, setPin, handlePinLogin, 'PIN')}
+          <button onClick={handlePinLogin} style={S.primaryBtn} disabled={loading !== null}>
+            {loading === 'pin' ? 'Verifying…' : 'Log In →'}
+          </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            {backLink('phone', '← Change number')}
+            <button type="button" onClick={() => goBack('forgot')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#f59e0b', fontSize: '0.82rem', textDecoration: 'underline' }}>
+              Forgot PIN?
             </button>
           </div>
-        )}
+        </>)}
+
+        {/* Set PIN for existing user without one */}
+        {step === 'set-pin' && (<>
+          <p style={{ ...mutedText, textAlign: 'center', margin: 0 }}>Welcome back! Set a PIN for next time.</p>
+          {pinField(pin, setPin, undefined, 'New PIN')}
+          {pinField(pinConfirm, setPinConfirm, handleSetPin, 'Confirm PIN')}
+          <button onClick={handleSetPin} style={S.primaryBtn} disabled={loading !== null}>
+            {loading === 'set-pin' ? 'Saving…' : 'Set PIN & Continue →'}
+          </button>
+          {backLink('phone')}
+        </>)}
+
+        {/* Signup: name */}
+        {step === 'signup-name' && (<>
+          <div>
+            <label style={S.label}>Your Name</label>
+            <input ref={inputRef} type="text" placeholder="Full name" value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) { setError(''); setStep('signup-pin'); }}}
+              style={S.inp} autoComplete="name" />
+          </div>
+          <button onClick={() => { if (!name.trim()) { setError('Name is required.'); return; } setError(''); setStep('signup-pin'); }} style={S.primaryBtn}>
+            Next →
+          </button>
+          {backLink('phone')}
+        </>)}
+
+        {/* Signup: PIN */}
+        {step === 'signup-pin' && (<>
+          {pinField(pin, setPin, undefined, 'Choose a PIN')}
+          {pinField(pinConfirm, setPinConfirm, handleSignup, 'Confirm PIN')}
+          <button onClick={handleSignup} style={S.primaryBtn} disabled={loading !== null}>
+            {loading === 'signup' ? 'Creating account…' : 'Create Account →'}
+          </button>
+          {backLink('signup-name')}
+        </>)}
+
+        {/* Forgot PIN */}
+        {step === 'forgot' && (<>
+          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '0.75rem', padding: '1rem', display: 'grid', gap: '0.5rem', textAlign: 'center' }}>
+            <div style={{ fontSize: '1.5rem' }}>📞</div>
+            <p style={{ margin: 0, fontWeight: 700, color: '#78350f' }}>Call the store to reset your PIN</p>
+            <a href="tel:+16092359158" style={{ color: '#d97706', fontWeight: 800, fontSize: '1.05rem' }}>(609) 235-9158</a>
+            <p style={{ ...mutedText, fontSize: '0.78rem', margin: 0 }}>
+              The store admin can clear your PIN so you can set a new one on next sign-in.
+            </p>
+          </div>
+          {backLink('pin')}
+        </>)}
+
       </div>
     </div>
   );
