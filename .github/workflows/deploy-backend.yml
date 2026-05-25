@@ -39,9 +39,10 @@ jobs:
 
       - name: Ensure App Service is running
         run: |
-          RG=$(az webapp show --name halalcart-api --query resourceGroup -o tsv)
+          RG=$(az webapp list --query "[?name=='halalcart-api'].resourceGroup" -o tsv)
           echo "Resource group: $RG"
           az webapp start --name halalcart-api --resource-group "$RG" || true
+          echo "AZURE_RG=$RG" >> $GITHUB_ENV
 
       - name: Zip backend for deployment
         run: |
@@ -54,16 +55,15 @@ jobs:
 
       - name: Deploy to Azure Web App
         run: |
-          RG=$(az webapp show --name halalcart-api --query resourceGroup -o tsv)
           az webapp deploy \
             --name halalcart-api \
-            --resource-group "$RG" \
+            --resource-group "$AZURE_RG" \
             --src-path backend-deploy.zip \
             --type zip \
             --async false
           az webapp config set \
             --name halalcart-api \
-            --resource-group "$RG" \
+            --resource-group "$AZURE_RG" \
             --startup-file 'gunicorn --bind=0.0.0.0:8000 --timeout 120 --workers 2 run:app'
 
       - name: Warm up backend
