@@ -7,9 +7,13 @@ import { S, mutedText } from '../theme';
 type AuthStep = 'phone' | 'pin' | 'set-pin' | 'signup-name' | 'signup-pin' | 'forgot';
 
 const SOCIAL_PROVIDERS = [
-  { connection: 'google-oauth2', label: 'Google',   icon: '🔵', bg: '#fff',    color: '#3c4043', border: '#dadce0' },
-  { connection: 'apple',         label: 'Apple',    icon: '🍎', bg: '#000',    color: '#fff',    border: '#000' },
-  { connection: 'facebook',      label: 'Facebook', icon: '📘', bg: '#1877f2', color: '#fff',    border: '#1877f2' },
+  { connection: 'google-oauth2', label: 'Google',    icon: '🔵', bg: '#fff',    color: '#3c4043', border: '#dadce0' },
+  { connection: 'apple',         label: 'Apple',     icon: '🍎', bg: '#000',    color: '#fff',    border: '#000' },
+  { connection: 'facebook',      label: 'Facebook',  icon: '📘', bg: '#1877f2', color: '#fff',    border: '#1877f2' },
+  { connection: 'yahoo',         label: 'Yahoo',     icon: '🟣', bg: '#6001d2', color: '#fff',    border: '#6001d2' },
+  { connection: 'discord',       label: 'Discord',   icon: '💬', bg: '#5865f2', color: '#fff',    border: '#5865f2' },
+  { connection: 'twitter',       label: 'Twitter/X', icon: '🐦', bg: '#000',    color: '#fff',    border: '#333' },
+  { connection: 'microsoft',     label: 'Microsoft', icon: '🪟', bg: '#2f2f2f', color: '#fff',    border: '#2f2f2f' },
 ];
 
 type Props = { onLogin: (user: User) => void; onClose: () => void };
